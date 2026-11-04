@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CameraRoll
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -54,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -98,6 +100,8 @@ import com.lens035.app.ui.components.LensIconButton
 import com.lens035.app.ui.components.LensSheet
 import com.lens035.app.ui.components.PrimaryPill
 import com.lens035.app.ui.components.ToolTab
+import com.lens035.app.Lens035App
+import com.lens035.app.data.UserPreset
 import com.lens035.app.ui.editor.AdjustPanel
 import com.lens035.app.ui.editor.AdjustTool
 import com.lens035.app.ui.editor.CropOverlay
@@ -106,6 +110,11 @@ import com.lens035.app.ui.editor.EffectDetails
 import com.lens035.app.ui.editor.EffectsStrip
 import com.lens035.app.ui.editor.FilmDetails
 import com.lens035.app.ui.editor.FilmsStrip
+import com.lens035.app.ui.editor.LookDetails
+import com.lens035.app.ui.editor.LooksStrip
+import com.lens035.app.ui.editor.PresetDetails
+import com.lens035.app.ui.editor.SavePresetDialog
+import com.lens035.app.ui.editor.scaledLook
 import com.lens035.app.ui.editor.orientedSize
 import com.lens035.app.ui.editor.shareMedia
 import com.lens035.app.ui.nav.Navigator
@@ -114,7 +123,10 @@ import com.lens035.app.ui.theme.LensColors
 import com.lens035.app.ui.theme.LensShapes
 import com.lens035.app.ui.theme.LensType
 import com.lens035.core.model.CropRect
+import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
+import com.lens035.core.presets.Look
+import com.lens035.core.presets.Looks
 import com.lens035.core.model.GeometryMath
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -123,6 +135,7 @@ import kotlinx.coroutines.launch
 private val VIDEO_EXCLUDED_EFFECTS = setOf(EffectType.BOKEH)
 
 private enum class VideoTool(val label: String, val icon: ImageVector) {
+    LOOKS("Görünüm", Icons.Rounded.AutoAwesome),
     FILM("Film", Icons.Rounded.CameraRoll),
     EFFECTS("Efekt", Icons.Rounded.Flare),
     ADJUST("Ayarla", Icons.Rounded.Tune),
@@ -139,6 +152,8 @@ private enum class VideoResolution(val label: String, val maxSide: Int) {
 private sealed interface VideoDetail {
     data object Film : VideoDetail
     data class Effect(val type: EffectType) : VideoDetail
+    data class LookStrength(val look: Look) : VideoDetail
+    data class Preset(val preset: UserPreset) : VideoDetail
 }
 
 private sealed interface ExportUi {
@@ -166,6 +181,12 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
     var resolution by remember { mutableStateOf(VideoResolution.FHD) }
     var exportUi by remember { mutableStateOf<ExportUi>(ExportUi.Idle) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    var selectedLook by remember { mutableStateOf<String?>(null) }
+    var lookBase by remember { mutableStateOf<EditState?>(null) }
+    var lookStrength by remember { mutableStateOf(100f) }
+    var showPresetDialog by remember { mutableStateOf(false) }
+    val app = context.applicationContext as Lens035App
+    val userPresets by app.presets.presets.collectAsState()
 
     val playerReleased = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val player = remember {
@@ -194,7 +215,10 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
         }
     }
 
-    LaunchedEffect(session) { session.load() }
+    LaunchedEffect(session) {
+        session.load()
+        app.presets.load()
+    }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -406,6 +430,33 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                 when {
                     d is VideoDetail.Film -> FilmDetails(session) { detail = null }
                     d is VideoDetail.Effect -> EffectDetails(session, d.type) { detail = null }
+                    d is VideoDetail.LookStrength -> LookDetails(d.look, lookStrength, session, { v ->
+                        lookStrength = v
+                        session.preview(scaledLook(lookBase ?: session.state, d.look.state, v / 100f))
+                    }) { detail = null }
+                    d is VideoDetail.Preset -> PresetDetails(d.preset, onDelete = {
+                        scope.launch { app.presets.delete(d.preset.id) }
+                        selectedLook = null
+                        detail = null
+                    }) { detail = null }
+                    t == VideoTool.LOOKS -> LooksStrip(
+                        session = session,
+                        selectedLook = selectedLook,
+                        userPresets = userPresets,
+                        onSelectLook = { look ->
+                            lookBase = session.state
+                            lookStrength = 100f
+                            selectedLook = look.id
+                            session.update { scaledLook(it, look.state, 1f) }
+                        },
+                        onSelectPreset = { p ->
+                            selectedLook = "u_" + p.id
+                            session.update { it.applyLook(p.state) }
+                        },
+                        onPresetDetails = { p -> detail = VideoDetail.Preset(p) },
+                        onSavePreset = { showPresetDialog = true },
+                        onDetails = { Looks.find(selectedLook ?: "")?.let { detail = VideoDetail.LookStrength(it) } },
+                    )
                     t == VideoTool.FILM -> FilmsStrip(session) { detail = VideoDetail.Film }
                     t == VideoTool.EFFECTS -> EffectsStrip(session, null, exclude = VIDEO_EXCLUDED_EFFECTS) { detail = VideoDetail.Effect(it) }
                     t == VideoTool.ADJUST -> AdjustTool(
@@ -429,6 +480,14 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                     tool = t
                 }, modifier = Modifier.weight(1f))
             }
+        }
+    }
+
+    if (showPresetDialog) {
+        SavePresetDialog(onDismiss = { showPresetDialog = false }) { name ->
+            scope.launch { app.presets.add(name, session.state) }
+            showPresetDialog = false
+            Toast.makeText(context, "Ön ayar kaydedildi", Toast.LENGTH_SHORT).show()
         }
     }
 

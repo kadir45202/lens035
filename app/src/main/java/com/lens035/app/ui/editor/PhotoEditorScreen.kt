@@ -40,14 +40,11 @@ import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Gradient
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -440,23 +437,11 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     )
 
     if (showPresetDialog) {
-        var name by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showPresetDialog = false },
-            title = { Text("Ön ayar olarak kaydet") },
-            text = {
-                OutlinedTextField(value = name, onValueChange = { name = it.take(24) }, singleLine = true, label = { Text("Ad") })
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch { app.presets.add(name, session.state) }
-                    showPresetDialog = false
-                    Toast.makeText(context, "Ön ayar kaydedildi", Toast.LENGTH_SHORT).show()
-                }) { Text("Kaydet") }
-            },
-            dismissButton = { TextButton(onClick = { showPresetDialog = false }) { Text("Vazgeç") } },
-            containerColor = LensColors.Raised,
-        )
+        SavePresetDialog(onDismiss = { showPresetDialog = false }) { name ->
+            scope.launch { app.presets.add(name, session.state) }
+            showPresetDialog = false
+            Toast.makeText(context, "Ön ayar kaydedildi", Toast.LENGTH_SHORT).show()
+        }
     }
 }
 

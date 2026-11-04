@@ -67,7 +67,11 @@ uniform vec3 u_dateColor;
 
 float gAspect; // aspect of the photo area, set in main()
 
-vec2 toSrc(vec2 q) { return (u_geo * vec3(q, 1.0)).xy; }
+// Output -> source coordinate. u_geo is projective when perspective correction is on.
+vec2 toSrc(vec2 q) {
+    vec3 p = u_geo * vec3(q, 1.0);
+    return p.xy / p.z;
+}
 
 vec3 img(vec2 q) {
     vec2 s = toSrc(q);

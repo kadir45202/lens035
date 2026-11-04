@@ -98,4 +98,83 @@ class GeometryTest {
         assertTrue(GeometryMath.cropFits(fitted2, 25f, w, h))
         assertEquals(1f, fitted2.width * w / (fitted2.height * h), 1e-2f)
     }
+
+    @Test
+    fun perspectiveKeepsCentreAndRoundTrips() {
+        val g = Geometry(vertical = -60f, horizontal = 30f, straighten = 4f)
+        assertPoint(0.5f, 0.5f, map(g, 0.5f, 0.5f))
+        val m = GeometryMath.outputToSourceRowMajor(400, 300, g)
+        val inv = GeometryMath.sourceToOutputRowMajor(400, 300, g)
+        val p = FloatArray(2)
+        for ((u, v) in listOf(0.1f to 0.2f, 0.8f to 0.9f, 0.3f to 0.6f)) {
+            GeometryMath.apply(m, u, v, p)
+            GeometryMath.apply(inv, p[0], p[1], p)
+            assertPoint(u, v, p)
+        }
+    }
+
+    @Test
+    fun negativeVerticalWidensTheTop() {
+        val g = Geometry(vertical = -60f)
+        // The top of the output shows a narrower strip of the source (it was stretched wider) ...
+        assertTrue(map(g, 0f, 0f)[0] > 0.01f)
+        assertTrue(map(g, 1f, 0f)[0] < 0.99f)
+        // ... and the bottom corners fall outside the source: empty until cropped.
+        assertTrue(map(g, 0f, 1f)[0] < 0f)
+        assertTrue(map(g, 1f, 1f)[0] > 1f)
+        // Positive horizontal enlarges the right side: its corners reach outside vertically less.
+        val hz = Geometry(horizontal = 60f)
+        assertTrue(map(hz, 1f, 0f)[1] > 0f)
+        assertTrue(map(hz, 0f, 0f)[1] < 0f)
+    }
+
+    @Test
+    fun cropAvoidsPerspectiveCorners() {
+        val w = 400f
+        val h = 300f
+        val g = Geometry(vertical = -70f, horizontal = 25f)
+        assertFalse(GeometryMath.cropFits(CropRect.FULL, g, w, h))
+        val fitted = GeometryMath.fitCrop(CropRect.FULL, g, w, h)
+        assertTrue(GeometryMath.cropFits(fitted, g, w, h))
+        assertEquals(w / h, fitted.width * w / (fitted.height * h), 1e-2f)
+        val best = GeometryMath.maxCropForAspect(0f, w, h, g)
+        assertTrue(GeometryMath.cropFits(best, g, w, h))
+        // Allowed to move off-centre, the largest crop is at least as big as the centred one.
+        assertTrue(best.width * best.height >= fitted.width * fitted.height - 1e-4f)
+        val square = GeometryMath.maxCropForAspect(1f, w, h, g)
+        assertTrue(GeometryMath.cropFits(square, g, w, h))
+        assertEquals(1f, square.width * w / (square.height * h), 1e-2f)
+    }
+
+    @Test
+    fun quarterTurnsAndMirrorsKeepThePerspectivePicture() {
+        val g = Geometry(vertical = -40f, horizontal = 20f, straighten = 5f)
+        // Turned clockwise: output (u', v') shows what (v', 1 - u') showed before.
+        val turned = g.copy(rotation = 1).rotatedCorrection(clockwise = true)
+        for ((u, v) in listOf(0.2f to 0.3f, 0.7f to 0.4f, 0.5f to 0.9f)) {
+            val a = map(turned, u, v)
+            val b = map(g, v, 1f - u)
+            assertEquals(b[0], a[0], 1e-3f)
+            assertEquals(b[1], a[1], 1e-3f)
+        }
+        val back = g.copy(rotation = 3).rotatedCorrection(clockwise = false)
+        for ((u, v) in listOf(0.2f to 0.3f, 0.7f to 0.4f)) {
+            val a = map(back, u, v)
+            val b = map(g, 1f - v, u)
+            assertEquals(b[0], a[0], 1e-3f)
+            assertEquals(b[1], a[1], 1e-3f)
+        }
+        val mirrored = g.copy(flipH = true).mirroredCorrectionH()
+        val flipped = g.copy(flipV = true).mirroredCorrectionV()
+        for ((u, v) in listOf(0.2f to 0.3f, 0.8f to 0.6f)) {
+            val a = map(mirrored, u, v)
+            val b = map(g, 1f - u, v)
+            assertEquals(b[0], a[0], 1e-3f)
+            assertEquals(b[1], a[1], 1e-3f)
+            val c = map(flipped, u, v)
+            val d = map(g, u, 1f - v)
+            assertEquals(d[0], c[0], 1e-3f)
+            assertEquals(d[1], c[1], 1e-3f)
+        }
+    }
 }

@@ -19,7 +19,10 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -356,6 +359,22 @@ fun PresetDetails(preset: UserPreset, onDelete: () -> Unit, onDone: () -> Unit) 
             style = LensType.Meta, color = LensColors.Faint, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
     }
+}
+
+/** Asks for a name, then hands it to [onSave] (a blank name gets a default in the store). */
+@Composable
+fun SavePresetDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ön ayar olarak kaydet") },
+        text = {
+            OutlinedTextField(value = name, onValueChange = { name = it.take(24) }, singleLine = true, label = { Text("Ad") })
+        },
+        confirmButton = { TextButton(onClick = { onSave(name) }) { Text("Kaydet") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } },
+        containerColor = LensColors.Raised,
+    )
 }
 
 /** Scales a look towards "no look" (strength 0..1), keeping the base edit's geometry and masks. */
