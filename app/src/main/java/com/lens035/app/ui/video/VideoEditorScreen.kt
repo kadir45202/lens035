@@ -181,6 +181,7 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
     var resolution by remember { mutableStateOf(VideoResolution.FHD) }
     var exportUi by remember { mutableStateOf<ExportUi>(ExportUi.Idle) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    var cropGuides by remember { mutableStateOf(false) }
     var selectedLook by remember { mutableStateOf<String?>(null) }
     var lookBase by remember { mutableStateOf<EditState?>(null) }
     var lookStrength by remember { mutableStateOf(100f) }
@@ -385,12 +386,13 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                     vt = vt,
                     crop = g.crop,
                     aspect = GeometryMath.aspectValue(g.aspect, ow.toFloat(), oh.toFloat()),
-                    straighten = g.straighten,
+                    correction = g,
                     orientedW = ow,
                     orientedH = oh,
                     onChange = { c -> session.preview(session.state.copy(geometry = session.state.geometry.copy(crop = c))) },
                     onGestureStart = { session.beginGesture() },
                     onGestureEnd = { session.endGesture() },
+                    guides = cropGuides,
                 )
             } else {
                 Box(
@@ -467,7 +469,7 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                         onImportLut = { Toast.makeText(context, "LUT'ları fotoğraf düzenleyicisinden içe aktarabilirsin.", Toast.LENGTH_SHORT).show() },
                         onDeleteLut = {},
                     )
-                    t == VideoTool.CROP -> CropTool(session)
+                    t == VideoTool.CROP -> CropTool(session, onGuides = { cropGuides = it })
                     t == VideoTool.TRIM -> TrimTool(session)
                 }
             }

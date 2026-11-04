@@ -66,7 +66,7 @@ fun rotateQuarter(state: EditState, clockwise: Boolean): EditState {
         else -> AspectRatio.FREE
     }
     return state.copy(
-        geometry = g.copy(
+        geometry = g.rotatedCorrection(clockwise).copy(
             rotation = ((g.rotation + if (clockwise) 1 else 3) % 4 + 4) % 4,
             crop = rotateCrop(g.crop, clockwise),
             aspect = aspect,
@@ -74,47 +74,94 @@ fun rotateQuarter(state: EditState, clockwise: Boolean): EditState {
     )
 }
 
+/** The fine corrections the crop tool's slider can drive. */
+private enum class Correction(val label: String, val min: Float, val max: Float, val format: ValueFormat) {
+    STRAIGHTEN("Düzleştir", -45f, 45f, ValueFormat.DEGREES),
+    VERTICAL("Dikey", -100f, 100f, ValueFormat.SIGNED),
+    HORIZONTAL("Yatay", -100f, 100f, ValueFormat.SIGNED),
+    ;
+
+    fun valueOf(g: Geometry): Float = when (this) {
+        STRAIGHTEN -> g.straighten
+        VERTICAL -> g.vertical
+        HORIZONTAL -> g.horizontal
+    }
+
+    fun set(g: Geometry, v: Float): Geometry = when (this) {
+        STRAIGHTEN -> g.copy(straighten = v)
+        VERTICAL -> g.copy(vertical = v)
+        HORIZONTAL -> g.copy(horizontal = v)
+    }
+}
+
+private fun nearlySame(a: CropRect, b: CropRect) =
+    kotlin.math.abs(a.left - b.left) + kotlin.math.abs(a.top - b.top) + kotlin.math.abs(a.right - b.right) + kotlin.math.abs(a.bottom - b.bottom) < 0.01f
+
+/**
+ * Aspect, straighten, perspective, quarter turns and flips. [onGuides] reports when a correction
+ * slider is being dragged so the canvas can show alignment guides.
+ */
 @Composable
-fun CropTool(session: EditSession) {
+fun CropTool(session: EditSession, onGuides: (Boolean) -> Unit = {}) {
     val g = session.state.geometry
     val (ow, oh) = orientedSize(session)
-    var straightenBase by remember { mutableStateOf<CropRect?>(null) }
+    val owf = ow.toFloat()
+    val ohf = oh.toFloat()
+    var correction by remember { mutableStateOf(Correction.STRAIGHTEN) }
+    // How the crop follows a correction drag, decided when the drag starts: an untouched crop
+    // stays the largest one that fits, a hand-made crop keeps its framing and only shrinks.
+    var dragBase by remember { mutableStateOf<CropRect?>(null) }
+    var dragKeepsLargest by remember { mutableStateOf(false) }
+    var dragAspect by remember { mutableStateOf(0f) }
+
+    fun cropAspect(geo: Geometry): Float =
+        GeometryMath.aspectValue(geo.aspect, owf, ohf).takeIf { it > 0f } ?: (geo.crop.width * owf / (geo.crop.height * ohf))
 
     fun setAspect(a: AspectRatio) {
-        val ratio = GeometryMath.aspectValue(a, ow.toFloat(), oh.toFloat())
-        val crop = if (ratio > 0f) {
-            GeometryMath.maxCropForAspect(ratio, ow.toFloat(), oh.toFloat(), g.straighten)
-        } else {
-            GeometryMath.fitCrop(CropRect.FULL, g.straighten, ow.toFloat(), oh.toFloat())
-        }
+        val ratio = GeometryMath.aspectValue(a, owf, ohf)
+        val crop = GeometryMath.maxCropForAspect(ratio, owf, ohf, g)
         session.update { it.copy(geometry = it.geometry.copy(aspect = a, crop = crop)) }
     }
 
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         ChipRow(AspectRatio.entries, g.aspect, { it.label }, { setAspect(it) })
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(Correction.entries) { c ->
+                val v = c.valueOf(g)
+                val text = if (v == 0f) c.label else c.label + " " + com.lens035.app.ui.components.formatValue(v, c.format)
+                LensChip(text, c == correction, { correction = c })
+            }
+        }
         LensSlider(
-            label = "Düzleştir",
-            value = g.straighten,
+            label = correction.label,
+            value = correction.valueOf(g),
             onValueChange = { v ->
-                val base = straightenBase ?: g.crop
-                val fitted = GeometryMath.fitCrop(base, v, ow.toFloat(), oh.toFloat())
-                session.preview(session.state.copy(geometry = session.state.geometry.copy(straighten = v, crop = fitted)))
+                val cur = session.state.geometry
+                val next = correction.set(cur, v)
+                val crop = if (dragKeepsLargest) {
+                    GeometryMath.maxCropForAspect(dragAspect, owf, ohf, next)
+                } else {
+                    GeometryMath.fitCrop(dragBase ?: cur.crop, next, owf, ohf)
+                }
+                session.preview(session.state.copy(geometry = next.copy(crop = crop)))
             },
-            min = -45f,
-            max = 45f,
+            min = correction.min,
+            max = correction.max,
             default = 0f,
-            format = ValueFormat.DEGREES,
+            format = correction.format,
             onGestureStart = {
                 session.beginGesture()
-                // Remember the crop before straightening so it can grow back.
-                straightenBase = if (g.straighten == 0f) g.crop else GeometryMath.maxCropForAspect(
-                    GeometryMath.aspectValue(g.aspect, ow.toFloat(), oh.toFloat()).takeIf { it > 0f } ?: (g.crop.width * ow / (g.crop.height * oh)),
-                    ow.toFloat(), oh.toFloat(), 0f,
-                )
+                val cur = session.state.geometry
+                dragAspect = cropAspect(cur)
+                dragKeepsLargest = nearlySame(cur.crop, GeometryMath.maxCropForAspect(dragAspect, owf, ohf, cur))
+                dragBase = cur.crop
+                onGuides(true)
             },
             onGestureEnd = {
-                straightenBase = null
+                dragBase = null
+                dragKeepsLargest = false
+                onGuides(false)
                 session.endGesture()
             },
         )
@@ -128,13 +175,13 @@ fun CropTool(session: EditSession) {
             LensIconButton(Icons.Rounded.Flip, "Yatay çevir", {
                 session.update {
                     val c = it.geometry.crop
-                    it.copy(geometry = it.geometry.copy(flipH = !it.geometry.flipH, straighten = -it.geometry.straighten, crop = CropRect(1f - c.right, c.top, 1f - c.left, c.bottom)))
+                    it.copy(geometry = it.geometry.mirroredCorrectionH().copy(flipH = !it.geometry.flipH, crop = CropRect(1f - c.right, c.top, 1f - c.left, c.bottom)))
                 }
             })
             LensIconButton(Icons.Rounded.Flip, "Dikey çevir", {
                 session.update {
                     val c = it.geometry.crop
-                    it.copy(geometry = it.geometry.copy(flipV = !it.geometry.flipV, straighten = -it.geometry.straighten, crop = CropRect(c.left, 1f - c.bottom, c.right, 1f - c.top)))
+                    it.copy(geometry = it.geometry.mirroredCorrectionV().copy(flipV = !it.geometry.flipV, crop = CropRect(c.left, 1f - c.bottom, c.right, 1f - c.top)))
                 }
             }, modifier = Modifier.rotate(90f))
             LensIconButton(Icons.Rounded.RestartAlt, "Sıfırla", { session.update { it.copy(geometry = Geometry()) } }, tint = LensColors.Muted)

@@ -132,6 +132,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     var adjustPanel by remember { mutableStateOf(AdjustPanel.LIGHT) }
     var comparing by remember { mutableStateOf(false) }
     var selectedMask by remember { mutableStateOf<Long?>(null) }
+    var cropGuides by remember { mutableStateOf(false) }
     var selectedLook by remember { mutableStateOf<String?>(null) }
     var lookBase by remember { mutableStateOf<com.lens035.core.model.EditState?>(null) }
     var lookStrength by remember { mutableStateOf(100f) }
@@ -275,12 +276,13 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                             vt = vt,
                             crop = g.crop,
                             aspect = GeometryMath.aspectValue(g.aspect, ow.toFloat(), oh.toFloat()),
-                            straighten = g.straighten,
+                            correction = g,
                             orientedW = ow,
                             orientedH = oh,
                             onChange = { c -> session.preview(session.state.copy(geometry = session.state.geometry.copy(crop = c))) },
                             onGestureStart = { session.beginGesture() },
                             onGestureEnd = { session.endGesture() },
+                            guides = cropGuides,
                         )
                     }
                     EditorTool.MASKS -> {
@@ -398,7 +400,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                                 }
                             },
                         )
-                        t == EditorTool.CROP -> CropTool(session)
+                        t == EditorTool.CROP -> CropTool(session, onGuides = { cropGuides = it })
                         t == EditorTool.MASKS -> MaskTool(session, selectedMask, { selectedMask = it }, personStatus = session.personStatus)
                     }
                 }

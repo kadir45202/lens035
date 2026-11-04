@@ -33,6 +33,7 @@ import com.lens035.app.gl.PersonMaskData
 import com.lens035.app.gl.ViewTransform
 import com.lens035.app.ui.theme.LensColors
 import com.lens035.core.model.CropRect
+import com.lens035.core.model.Geometry
 import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.LocalMask
 import com.lens035.core.model.MaskKind
@@ -47,20 +48,23 @@ import kotlin.math.sin
 private enum class CropHandle { NONE, MOVE, L, T, R, B, TL, TR, BL, BR }
 
 /**
- * Crop rectangle editor drawn over the full (uncropped, straightened) frame. Coordinates are
+ * Crop rectangle editor drawn over the full (uncropped, corrected) frame. Coordinates are
  * normalised to the oriented frame, which in crop mode is exactly the displayed image.
+ * [correction] supplies straighten and perspective (its crop is ignored); the crop can never
+ * leave the corrected image. [guides] draws a fine grid for lining up verticals.
  */
 @Composable
 fun CropOverlay(
     vt: ViewTransform,
     crop: CropRect,
     aspect: Float,
-    straighten: Float,
+    correction: Geometry,
     orientedW: Int,
     orientedH: Int,
     onChange: (CropRect) -> Unit,
     onGestureStart: () -> Unit,
     onGestureEnd: () -> Unit,
+    guides: Boolean = false,
 ) {
     val density = LocalDensity.current
     val touch = with(density) { 28.dp.toPx() }
@@ -70,11 +74,13 @@ fun CropOverlay(
     val start by rememberUpdatedState(onGestureStart)
     val end by rememberUpdatedState(onGestureEnd)
     var active by remember { mutableStateOf(false) }
+    // Only the correction itself restarts the gesture handler, not every crop change.
+    val fitGeometry = Geometry(straighten = correction.straighten, vertical = correction.vertical, horizontal = correction.horizontal)
 
     Canvas(
         Modifier
             .fillMaxSize()
-            .pointerInput(aspect, straighten, orientedW, orientedH) {
+            .pointerInput(aspect, fitGeometry, orientedW, orientedH) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     val v = currentVt
@@ -111,7 +117,7 @@ fun CropOverlay(
                         val dx = delta.x / v.width
                         val dy = delta.y / v.height
                         val next = adjustCrop(rect, handle, dx, dy, aspect, orientedW.toFloat(), orientedH.toFloat())
-                        if (next != null && GeometryMath.cropFits(next, straighten, orientedW.toFloat(), orientedH.toFloat())) {
+                        if (next != null && GeometryMath.cropFits(next, fitGeometry, orientedW.toFloat(), orientedH.toFloat())) {
                             rect = next
                             change(next)
                         }
@@ -132,12 +138,23 @@ fun CropOverlay(
         drawRect(dim, Offset(r, t), Size(max(0f, size.width - r), b - t))
         val lineW = 1.dp.toPx()
         drawRect(Color.White.copy(alpha = 0.9f), Offset(l, t), Size(r - l, b - t), style = Stroke(lineW))
-        val gridAlpha = if (active) 0.55f else 0.28f
-        for (i in 1..2) {
-            val x = l + (r - l) * i / 3f
-            val y = t + (b - t) * i / 3f
-            drawLine(Color.White.copy(alpha = gridAlpha), Offset(x, t), Offset(x, b), lineW)
-            drawLine(Color.White.copy(alpha = gridAlpha), Offset(l, y), Offset(r, y), lineW)
+        if (guides) {
+            // A fine grid while straightening or fixing perspective: verticals line up against it.
+            val n = 8
+            for (i in 1 until n) {
+                val x = l + (r - l) * i / n
+                val y = t + (b - t) * i / n
+                drawLine(Color.White.copy(alpha = 0.4f), Offset(x, t), Offset(x, b), lineW)
+                drawLine(Color.White.copy(alpha = 0.4f), Offset(l, y), Offset(r, y), lineW)
+            }
+        } else {
+            val gridAlpha = if (active) 0.55f else 0.28f
+            for (i in 1..2) {
+                val x = l + (r - l) * i / 3f
+                val y = t + (b - t) * i / 3f
+                drawLine(Color.White.copy(alpha = gridAlpha), Offset(x, t), Offset(x, b), lineW)
+                drawLine(Color.White.copy(alpha = gridAlpha), Offset(l, y), Offset(r, y), lineW)
+            }
         }
         val arm = 18.dp.toPx()
         val thick = 3.dp.toPx()
@@ -217,6 +234,12 @@ class SourceViewMapper(
         return Offset(vt.left + tmp[0] * vt.width, vt.top + tmp[1] * vt.height)
     }
 
+    /** Source uv -> view pixels as a row-major 3x3 (projective when perspective is on). */
+    fun sourceToViewMatrix(): FloatArray = GeometryMath.mul(
+        floatArrayOf(vt.width, 0f, vt.left, 0f, vt.height, vt.top, 0f, 0f, 1f),
+        srcToOut,
+    )
+
     fun toSource(p: Offset): Offset {
         val ou = (p.x - vt.left) / vt.width
         val ov = (p.y - vt.top) / vt.height
@@ -242,19 +265,21 @@ fun PersonMaskTint(mapper: SourceViewMapper, vt: ViewTransform, mask: PersonMask
     val tint = remember(mask.key, inverted) { personTintBitmap(mask, inverted).asImageBitmap() }
     val matrix = remember { Matrix() }
     Canvas(Modifier.fillMaxSize()) {
-        // Source corners through the edit geometry; the mapping is affine, so three points fix it.
-        val p0 = mapper.toView(0f, 0f)
-        val p1 = mapper.toView(1f, 0f)
-        val p2 = mapper.toView(0f, 1f)
-        val w = tint.width.toFloat()
-        val h = tint.height.toFloat()
+        // Tint pixels -> source uv -> view, through the full (possibly projective) edit geometry.
+        val m = GeometryMath.mul(
+            mapper.sourceToViewMatrix(),
+            floatArrayOf(1f / tint.width, 0f, 0f, 0f, 1f / tint.height, 0f, 0f, 0f, 1f),
+        )
         matrix.reset()
-        matrix.values[Matrix.ScaleX] = (p1.x - p0.x) / w
-        matrix.values[Matrix.SkewY] = (p1.y - p0.y) / w
-        matrix.values[Matrix.SkewX] = (p2.x - p0.x) / h
-        matrix.values[Matrix.ScaleY] = (p2.y - p0.y) / h
-        matrix.values[Matrix.TranslateX] = p0.x
-        matrix.values[Matrix.TranslateY] = p0.y
+        matrix.values[Matrix.ScaleX] = m[0]
+        matrix.values[Matrix.SkewX] = m[1]
+        matrix.values[Matrix.TranslateX] = m[2]
+        matrix.values[Matrix.SkewY] = m[3]
+        matrix.values[Matrix.ScaleY] = m[4]
+        matrix.values[Matrix.TranslateY] = m[5]
+        matrix.values[Matrix.Perspective0] = m[6]
+        matrix.values[Matrix.Perspective1] = m[7]
+        matrix.values[Matrix.Perspective2] = m[8]
         clipRect(vt.left, vt.top, vt.right, vt.bottom) {
             withTransform({ transform(matrix) }) {
                 drawImage(tint, alpha = alpha * 0.6f)
