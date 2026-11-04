@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -74,6 +75,7 @@ internal suspend fun renderToolThumbnails(
  * One photo edit: the source, the current state (with history, see [EditSession]), image
  * statistics, thumbnails, autosave as a project, and full-resolution export.
  */
+@Stable
 class PhotoSession(
     private val context: Context,
     val sourceUri: Uri,

@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -32,6 +33,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 /** One video edit: source info, trim/speed/audio, the look (shared with photos) and thumbnails. */
+@Stable
 class VideoSession(
     private val context: Context,
     val uri: Uri,

@@ -385,33 +385,17 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
             }
         }
 
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            LensIconButton(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Duraklat" else "Oynat", {
+        PlaybackControls(
+            playing = playing,
+            position = { position },
+            session = session,
+            onPlayPause = {
                 if (player.isPlaying) player.pause() else {
                     if (position < session.trimStartMs || position >= session.trimEndMs) player.seekTo(session.trimStartMs)
                     player.play()
                 }
-            })
-            Text(
-                "${formatTime(position)} / ${formatTime(session.durationMs)}",
-                style = LensType.Value,
-                color = LensColors.Muted,
-                modifier = Modifier.weight(1f),
-            )
-            LensIconButton(if (session.muted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp, "Ses", { session.muted = !session.muted })
-        }
-        Timeline(
-            frames = session.timeline,
-            durationMs = session.durationMs,
-            trimStartMs = session.trimStartMs,
-            trimEndMs = session.trimEndMs,
-            positionMs = position,
-            onTrim = { s, e ->
-                session.trimStartMs = s
-                session.trimEndMs = e
             },
             onSeek = { player.seekTo(it) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         )
 
         AnimatedContent(targetState = detail to tool, transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) }, label = "vtool") { (d, t) ->
@@ -500,6 +484,45 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
             }
         }
     }
+}
+
+/** Reads the fast-changing playhead in its own scope so the rest of the screen stays put. */
+@Composable
+private fun PlaybackControls(
+    playing: Boolean,
+    position: () -> Long,
+    session: VideoSession,
+    onPlayPause: () -> Unit,
+    onSeek: (Long) -> Unit,
+) {
+    val pos = position()
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        LensIconButton(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Duraklat" else "Oynat", onPlayPause)
+        Text(
+            "${formatTime(pos)} / ${formatTime(session.durationMs)}",
+            style = LensType.Value,
+            color = LensColors.Muted,
+            modifier = Modifier.weight(1f),
+        )
+        LensIconButton(
+            if (session.muted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp,
+            if (session.muted) "Sesi aç" else "Sesi kapat",
+            { session.muted = !session.muted },
+        )
+    }
+    Timeline(
+        frames = session.timeline,
+        durationMs = session.durationMs,
+        trimStartMs = session.trimStartMs,
+        trimEndMs = session.trimEndMs,
+        positionMs = pos,
+        onTrim = { s, e ->
+            session.trimStartMs = s
+            session.trimEndMs = e
+        },
+        onSeek = onSeek,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+    )
 }
 
 @Composable

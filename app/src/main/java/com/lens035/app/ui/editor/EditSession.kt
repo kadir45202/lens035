@@ -1,5 +1,6 @@
 package com.lens035.app.ui.editor
 
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -12,6 +13,7 @@ import com.lens035.core.model.EffectType
  * What the tool panels need from an edit, shared by photos and videos: the current state,
  * history-aware mutation, thumbnails and the size of the source frame.
  */
+@Stable
 abstract class EditSession(initial: EditState) {
     var state by mutableStateOf(initial)
         protected set
