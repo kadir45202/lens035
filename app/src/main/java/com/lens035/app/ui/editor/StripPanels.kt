@@ -346,7 +346,7 @@ fun PresetDetails(preset: UserPreset, onDelete: () -> Unit, onDone: () -> Unit) 
             GhostPill("Ön ayarı sil", onClick = onDelete, icon = Icons.Rounded.DeleteOutline)
         }
         Text(
-            "Ön ayarlar crop ve maskeler hariç tüm görünümü saklar; başka fotoğraflara tek dokunuşla uygulanır.",
+            "Ön ayarlar kırpma ve maskeler hariç tüm görünümü saklar; başka fotoğraflara tek dokunuşla uygulanır.",
             style = LensType.Meta, color = LensColors.Faint, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
     }

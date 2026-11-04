@@ -176,7 +176,7 @@ class VideoExporter(context: Context) {
 
     private fun readableError(e: ExportException): String = when (e.errorCode) {
         ExportException.ERROR_CODE_ENCODER_INIT_FAILED, ExportException.ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED ->
-            "Cihazın video kodlayıcısı bu çözünürlüğü desteklemiyor. Daha düşük bir çözünürlük deneyin."
+            "Cihazın video kodlayıcısı bu çözünürlüğü desteklemiyor. Daha düşük bir çözünürlük dene."
         ExportException.ERROR_CODE_DECODER_INIT_FAILED, ExportException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ->
             "Bu video biçimi cihazda çözülemiyor."
         ExportException.ERROR_CODE_IO_FILE_NOT_FOUND, ExportException.ERROR_CODE_IO_NO_PERMISSION ->

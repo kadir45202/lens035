@@ -49,7 +49,7 @@ fun DrawScope.drawPoseSilhouette(s: PoseSkeleton, opacity: Float, highlight: Col
     val torso = if (ls != null && rs != null && lh != null && rh != null) {
         hypot((ls.x + rs.x) / 2f - (lh.x + rh.x) / 2f, (ls.y + rs.y) / 2f - (lh.y + rh.y) / 2f)
     } else size.minDimension * 0.25f
-    val limbWidth = max(torso * 0.2f, 6f)
+    val limbWidth = max(torso * 0.25f, 6f)
     val fill = Color.White.copy(alpha = 0.22f * opacity)
     val line = Color.White.copy(alpha = 0.8f * opacity)
 

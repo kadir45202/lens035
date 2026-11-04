@@ -56,7 +56,7 @@ enum class AdjustPanel(val label: String) {
     LIGHT("Işık"),
     COLOR("Renk"),
     MIXER("Karışım"),
-    GRADING("Renk tonu"),
+    GRADING("Tonlama"),
     CURVE("Eğri"),
     DETAIL("Detay"),
     EFFECTS("Efektler"),
