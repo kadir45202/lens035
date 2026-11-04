@@ -53,7 +53,12 @@ internal suspend fun renderToolThumbnails(
     val films = FilmCatalog.all
     val filmStates = films.map { EditState(film = FilmDefaults.settingsFor(it)) }
     val effectTypes = EffectType.entries
-    val effectStates = effectTypes.map { EditState().withEffect(it.defaultInstance(7)) }
+    // Thumbnails are tiny, so effects are previewed stronger than their default to read clearly.
+    val effectStates = effectTypes.map { type ->
+        val fx = type.defaultInstance(7)
+        val boosted = if (type == EffectType.FRAME || type == EffectType.MIRROR) fx else fx.withValue(type.amountParam, maxOf(fx.amount, 85f))
+        EditState().withEffect(boosted)
+    }
     val lookStates = Looks.all.map { it.state }
     val all = app.offscreen.execute { gl -> gl.renderAll(thumb, filmStates + effectStates + lookStates, stats, dateText) }
     val f = HashMap<String, ImageBitmap>()

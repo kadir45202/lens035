@@ -215,6 +215,7 @@ private fun CurvePanel(session: EditSession) {
                 session.update { it.copy(curves = it.curves.withPoints(channel, com.lens035.core.color.ToneCurve.IDENTITY_POINTS)) }
             }, modifier = Modifier.padding(end = 12.dp))
         }
+        Spacer(Modifier.height(6.dp))
         CurveEditor(
             points = session.state.curves.points(channel),
             color = color,

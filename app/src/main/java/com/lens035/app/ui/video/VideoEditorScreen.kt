@@ -176,7 +176,7 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
     val glView = remember {
         GLSurfaceView(context).apply {
             setEGLContextClientVersion(3)
-            setEGLConfigChooser(8, 8, 8, 8, 0, 0)
+            setEGLConfigChooser(8, 8, 8, 0, 0, 0)
             preserveEGLContextOnPause = true
         }
     }

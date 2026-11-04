@@ -5,6 +5,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -121,6 +122,7 @@ fun CurveEditor(
     Canvas(
         modifier
             .aspectRatio(1.6f)
+            .padding(10.dp)
             .pointerInput(Unit) {
                 detectTapGestures(onDoubleTap = { pos ->
                     val pts = currentPoints

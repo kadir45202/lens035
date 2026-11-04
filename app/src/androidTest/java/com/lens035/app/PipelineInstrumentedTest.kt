@@ -1,0 +1,150 @@
+package com.lens035.app
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.lens035.app.gl.EglCore
+import com.lens035.app.gl.LensPipeline
+import com.lens035.app.gl.OffscreenGl
+import com.lens035.app.gl.ShaderSources
+import com.lens035.core.analysis.ImageStats
+import com.lens035.core.film.FilmCatalog
+import com.lens035.core.model.EditState
+import com.lens035.core.model.EffectType
+import com.lens035.core.model.Geometry
+import com.lens035.core.model.LightSettings
+import com.lens035.core.model.LocalMask
+import com.lens035.core.presets.Looks
+import com.lens035.core.render.FilmDefaults
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import kotlin.math.abs
+
+/**
+ * Runs the real GLES 3 pipeline on the device/emulator GPU: every film, effect and look must
+ * compile, render without GL errors and produce a sensible image, and the orientation chain
+ * (upload -> passes -> readback) must keep the picture upright.
+ */
+@RunWith(AndroidJUnit4::class)
+class PipelineInstrumentedTest {
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private lateinit var egl: EglCore
+    private lateinit var pipeline: LensPipeline
+    private lateinit var gl: OffscreenGl
+    private lateinit var source: Bitmap
+
+    @Before
+    fun setUp() {
+        egl = EglCore().also { it.create() }
+        pipeline = LensPipeline(ShaderSources.get(context))
+        pipeline.init()
+        gl = OffscreenGl(pipeline)
+        source = testImage(240, 180)
+    }
+
+    @After
+    fun tearDown() {
+        pipeline.release()
+        egl.release()
+    }
+
+    /** Top half warm red, bottom half blue, with a grey ramp across the middle. */
+    private fun testImage(w: Int, h: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint()
+        p.color = Color.rgb(200, 60, 40)
+        c.drawRect(0f, 0f, w.toFloat(), h / 2f, p)
+        p.color = Color.rgb(40, 70, 190)
+        c.drawRect(0f, h / 2f, w.toFloat(), h.toFloat(), p)
+        for (x in 0 until w) {
+            val v = x * 255 / (w - 1)
+            p.color = Color.rgb(v, v, v)
+            c.drawRect(x.toFloat(), h * 0.45f, x + 1f, h * 0.55f, p)
+        }
+        return bmp
+    }
+
+    private fun render(state: EditState): Bitmap = gl.render(source, state, ImageStats.NEUTRAL, "'98 11 04")
+
+    private fun meanLuma(b: Bitmap): Float {
+        var sum = 0.0
+        for (y in 0 until b.height step 4) for (x in 0 until b.width step 4) {
+            val c = b.getPixel(x, y)
+            sum += (Color.red(c) * 0.2126 + Color.green(c) * 0.7152 + Color.blue(c) * 0.0722)
+        }
+        return (sum / ((b.width / 4) * (b.height / 4))).toFloat()
+    }
+
+    @Test
+    fun neutralEditReproducesTheSource() {
+        val out = render(EditState())
+        assertEquals(source.width, out.width)
+        assertEquals(source.height, out.height)
+        var maxDiff = 0
+        for (y in 0 until out.height step 3) for (x in 0 until out.width step 3) {
+            val a = source.getPixel(x, y)
+            val b = out.getPixel(x, y)
+            maxDiff = maxOf(maxDiff, abs(Color.red(a) - Color.red(b)), abs(Color.green(a) - Color.green(b)), abs(Color.blue(a) - Color.blue(b)))
+        }
+        assertTrue("neutral render differs by $maxDiff", maxDiff <= 3)
+    }
+
+    @Test
+    fun pictureStaysUpright() {
+        val out = render(EditState())
+        val top = out.getPixel(out.width / 2, out.height / 8)
+        val bottom = out.getPixel(out.width / 2, out.height * 7 / 8)
+        assertTrue("top should be red", Color.red(top) > Color.blue(top))
+        assertTrue("bottom should be blue", Color.blue(bottom) > Color.red(bottom))
+    }
+
+    @Test
+    fun exposureBrightens() {
+        val base = meanLuma(render(EditState()))
+        val bright = meanLuma(render(EditState(light = LightSettings(exposure = 1f))))
+        assertTrue("$bright <= $base", bright > base + 10f)
+    }
+
+    @Test
+    fun everyFilmRenders() {
+        for (film in FilmCatalog.all) {
+            val out = render(EditState(film = FilmDefaults.settingsFor(film)))
+            val l = meanLuma(out)
+            assertTrue("${film.id} produced a blank image ($l)", l in 5f..250f)
+        }
+    }
+
+    @Test
+    fun everyEffectRenders() {
+        for (type in EffectType.entries) {
+            val out = render(EditState().withEffect(type.defaultInstance(5)))
+            val l = meanLuma(out)
+            assertTrue("${type.name} produced a blank image ($l)", l in 3f..252f)
+        }
+    }
+
+    @Test
+    fun everyLookRenders() {
+        for (look in Looks.all) {
+            val l = meanLuma(render(look.state))
+            assertTrue("${look.id} produced a blank image ($l)", l in 3f..252f)
+        }
+    }
+
+    @Test
+    fun geometryAndMasksRender() {
+        val rotated = render(EditState(geometry = Geometry(rotation = 1)))
+        assertEquals(source.height, rotated.width)
+        assertEquals(source.width, rotated.height)
+        val masked = render(EditState(masks = listOf(LocalMask.newRadial(1), LocalMask.newLinear(2))))
+        assertTrue(meanLuma(masked) > 3f)
+    }
+}
