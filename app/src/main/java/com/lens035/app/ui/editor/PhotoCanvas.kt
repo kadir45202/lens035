@@ -104,10 +104,12 @@ fun PhotoCanvas(
     }
     // Read the edit in composition so that every change recomposes and reaches the renderer.
     val editState = session.state
+    val personMask = session.personMask
     SideEffect {
         renderer.marginPx = marginPx
         renderer.setState(editState)
         renderer.setMode(mode)
+        renderer.setPersonMask(personMask)
     }
 
     var viewSize by remember { mutableStateOf(IntSize.Zero) }

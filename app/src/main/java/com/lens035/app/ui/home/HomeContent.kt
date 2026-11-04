@@ -285,6 +285,6 @@ fun relativeTime(then: Long, now: Long): String {
         diff < day -> "${diff / hour} saat önce"
         diff < 2 * day -> "dün"
         diff < 7 * day -> "${diff / day} gün önce"
-        else -> java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale("tr")).format(java.util.Date(then))
+        else -> java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.forLanguageTag("tr")).format(java.util.Date(then))
     }
 }

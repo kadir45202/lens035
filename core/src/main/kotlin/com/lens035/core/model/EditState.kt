@@ -267,6 +267,9 @@ data class LocalAdjust(
 enum class MaskKind {
     @SerialName("linear") LINEAR,
     @SerialName("radial") RADIAL,
+
+    /** The person found by on-device segmentation (photos only). Geometry fields are unused. */
+    @SerialName("person") PERSON,
 }
 
 /**
@@ -302,6 +305,12 @@ data class LocalMask(
             id = id, kind = MaskKind.RADIAL,
             x0 = 0.5f, y0 = 0.5f, x1 = 0.28f, y1 = 0.28f, feather = 60f,
             adjust = LocalAdjust(exposure = 0.4f),
+        )
+
+        fun newPerson(id: Long) = LocalMask(
+            id = id, kind = MaskKind.PERSON,
+            x0 = 0f, y0 = 0f, x1 = 0f, y1 = 0f, feather = 40f,
+            adjust = LocalAdjust(exposure = 0.25f, shadows = 15f),
         )
     }
 }
@@ -343,6 +352,16 @@ data class EditState(
 
     /** Applies a preset/look on top of this edit while keeping crop and masks. */
     fun applyLook(look: EditState): EditState = look.copy(geometry = geometry, masks = masks)
+
+    /** True when the edit uses the on-device person segmentation (person mask, portrait blur, skin). */
+    val needsPersonMask: Boolean
+        get() = hasEffect(EffectType.BOKEH) || enhance.skin > 0f ||
+            masks.any { it.enabled && it.kind == MaskKind.PERSON }
+
+    /** Drops the photo-only features (person masks, portrait blur) for video rendering. */
+    fun forVideo(): EditState =
+        if (!hasEffect(EffectType.BOKEH) && masks.none { it.kind == MaskKind.PERSON }) this
+        else withoutEffect(EffectType.BOKEH).copy(masks = masks.filter { it.kind != MaskKind.PERSON })
 
     companion object {
         const val CURRENT_VERSION = 1

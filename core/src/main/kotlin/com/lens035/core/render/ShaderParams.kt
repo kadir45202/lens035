@@ -49,6 +49,10 @@ class RenderParams(
     val needsBloomPyramid: Boolean,
     /** Date stamp text to rasterise, or null. */
     val dateStamp: DateStampSpec?,
+    /** Whether a person segmentation mask should be bound (when the app has one). */
+    val needsPersonMask: Boolean = false,
+    /** Whether the portrait blur needs its background-only blur pyramid. */
+    val needsBokehPyramid: Boolean = false,
 )
 
 data class DateStampSpec(val text: String, val style: Int)
@@ -99,6 +103,8 @@ object ShaderParams {
             curves = state.curves,
             needsBloomPyramid = needsBloom,
             dateStamp = dateFx?.let { DateStampSpec(dateText, it.value(EffectType.DATE_STAMP.param("style")!!).toInt()) },
+            needsPersonMask = state.needsPersonMask,
+            needsBokehPyramid = state.hasEffect(EffectType.BOKEH),
         )
     }
 
@@ -181,7 +187,11 @@ object ShaderParams {
         val adj = FloatArray(MAX_MASKS * 12)
         masks.forEachIndexed { i, m ->
             val o = i * 8
-            geo[o] = if (m.kind == MaskKind.LINEAR) 0f else 1f
+            geo[o] = when (m.kind) {
+                MaskKind.LINEAR -> 0f
+                MaskKind.RADIAL -> 1f
+                MaskKind.PERSON -> 2f
+            }
             geo[o + 1] = if (m.invert) 1f else 0f
             geo[o + 2] = (m.feather / 100f).coerceIn(0f, 1f)
             geo[o + 3] = m.angle
@@ -275,6 +285,9 @@ object ShaderParams {
         u.v4("u_fxPixel", amt(EffectType.PIXELATE), 0f, 0f, 0f)
         fx(EffectType.ZOOM_BLUR).let {
             u.v4("u_fxZoom", amt(EffectType.ZOOM_BLUR), it?.v("x") ?: 0.5f, it?.v("y") ?: 0.5f, it?.v("clear") ?: 0.3f)
+        }
+        fx(EffectType.BOKEH).let {
+            u.v4("u_fxBokeh", amt(EffectType.BOKEH), it?.v("glow") ?: 0.3f, it?.v("edge") ?: 0.45f, 0f)
         }
         fx(EffectType.TILT_SHIFT).let {
             u.v4(

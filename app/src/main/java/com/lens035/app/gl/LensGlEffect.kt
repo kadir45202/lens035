@@ -31,7 +31,8 @@ class LensGlEffect(
     private val dateText: String,
 ) : GlEffect {
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
-        LensShaderProgram(context.applicationContext, state, stats, maxOutputSide, dateText)
+        // Video frames have no person segmentation: portrait blur and person masks are photo-only.
+        LensShaderProgram(context.applicationContext, state.forVideo(), stats, maxOutputSide, dateText)
 
     override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean = false
 }

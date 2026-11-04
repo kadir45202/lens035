@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.InvertColors
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Rotate90DegreesCcw
 import androidx.compose.material.icons.rounded.Rotate90DegreesCw
@@ -143,15 +144,38 @@ fun CropTool(session: EditSession) {
 
 // ---------------------------------------------------------------------------- masks
 
+/** Display name of a mask in the chip row: kind plus its position. */
+fun maskLabel(m: LocalMask, index: Int): String = when (m.kind) {
+    MaskKind.LINEAR -> "Doğrusal"
+    MaskKind.RADIAL -> "Dairesel"
+    MaskKind.PERSON -> "Kişi"
+} + " " + (index + 1)
+
+/** One line on the state of person detection, or null when there is nothing to say. */
+fun personStatusText(status: PersonStatus?): String? = when (status) {
+    PersonStatus.SEARCHING, PersonStatus.UNKNOWN -> "Kişi aranıyor…"
+    PersonStatus.NOT_FOUND -> "Fotoğrafta kişi bulunamadı"
+    PersonStatus.FAILED -> "Kişi algılanamadı"
+    PersonStatus.FOUND, null -> null
+}
+
+/**
+ * Local adjustments. [personStatus] is null where person masks are not available (video);
+ * otherwise it is the progress of person detection for the current photo.
+ */
 @Composable
-fun MaskTool(session: EditSession, selectedId: Long?, onSelect: (Long?) -> Unit) {
+fun MaskTool(session: EditSession, selectedId: Long?, onSelect: (Long?) -> Unit, personStatus: PersonStatus? = null) {
     val masks = session.state.masks
     val selected = masks.firstOrNull { it.id == selectedId }
 
     fun add(kind: MaskKind) {
         if (masks.size >= com.lens035.core.render.ShaderParams.MAX_MASKS) return
         val id = (masks.maxOfOrNull { it.id } ?: 0L) + 1L
-        val m = if (kind == MaskKind.LINEAR) LocalMask.newLinear(id) else LocalMask.newRadial(id)
+        val m = when (kind) {
+            MaskKind.LINEAR -> LocalMask.newLinear(id)
+            MaskKind.RADIAL -> LocalMask.newRadial(id)
+            MaskKind.PERSON -> LocalMask.newPerson(id)
+        }
         session.update { it.copy(masks = it.masks + m) }
         onSelect(id)
     }
@@ -166,18 +190,33 @@ fun MaskTool(session: EditSession, selectedId: Long?, onSelect: (Long?) -> Unit)
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(masks, key = { it.id }) { m ->
-                val label = (if (m.kind == MaskKind.LINEAR) "Doğrusal " else "Dairesel ") + (masks.indexOf(m) + 1)
-                LensChip(label, m.id == selectedId, { onSelect(m.id) })
+                LensChip(maskLabel(m, masks.indexOf(m)), m.id == selectedId, { onSelect(m.id) })
             }
             if (masks.size < com.lens035.core.render.ShaderParams.MAX_MASKS) {
+                if (personStatus != null) {
+                    item {
+                        GhostPill(
+                            "Kişi",
+                            onClick = { add(MaskKind.PERSON) },
+                            icon = Icons.Rounded.Person,
+                            enabled = personStatus != PersonStatus.NOT_FOUND && personStatus != PersonStatus.FAILED,
+                        )
+                    }
+                }
                 item { GhostPill("Doğrusal", onClick = { add(MaskKind.LINEAR) }, icon = Icons.Rounded.Add) }
                 item { GhostPill("Dairesel", onClick = { add(MaskKind.RADIAL) }, icon = Icons.Rounded.Add) }
             }
         }
         if (selected == null) {
+            val text = when {
+                masks.isNotEmpty() -> "Düzenlemek için bir maske seç."
+                personStatus == PersonStatus.NOT_FOUND || personStatus == PersonStatus.FAILED ->
+                    "Bölgesel düzenleme için bir maske ekle. " + personStatusText(personStatus) + ", doğrusal ya da dairesel maske kullanabilirsin."
+                personStatus != null -> "Bölgesel düzenleme için bir maske ekle: kişiyi aydınlat, gökyüzünü koyulaştır."
+                else -> "Bölgesel düzenleme için bir maske ekle: gökyüzünü koyulaştır, yüzü aydınlat."
+            }
             Text(
-                if (masks.isEmpty()) "Bölgesel düzenleme için bir maske ekle: gökyüzünü koyulaştır, yüzü aydınlat."
-                else "Düzenlemek için bir maske seç.",
+                text,
                 style = LensType.Meta,
                 color = LensColors.Faint,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
@@ -196,6 +235,14 @@ fun MaskTool(session: EditSession, selectedId: Long?, onSelect: (Long?) -> Unit)
                         onSelect(null)
                     }, icon = Icons.Rounded.DeleteOutline)
                 }
+            }
+            if (selected.kind == MaskKind.PERSON) {
+                personStatusText(personStatus)?.let { msg ->
+                    item {
+                        Text(msg, style = LensType.Meta, color = LensColors.Faint, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+                    }
+                }
+                item { SliderItem("Kenar yumuşaklığı", selected.feather, 0f, 100f, 40f, session) { v -> setMask { it.copy(feather = v) } } }
             }
             if (selected.kind == MaskKind.RADIAL) {
                 item { SliderItem("Yumuşaklık", selected.feather, 0f, 100f, 50f, session) { v -> setMask { it.copy(feather = v) } } }

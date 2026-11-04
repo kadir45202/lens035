@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import androidx.exifinterface.media.ExifInterface
@@ -147,19 +148,27 @@ object BitmapLoader {
 
     /** Center-cropped, small copy for thumbnails (keeps the source untouched). */
     fun thumbnail(source: Bitmap, width: Int, height: Int): Bitmap {
-        val targetAspect = width.toFloat() / height
-        val srcAspect = source.width.toFloat() / source.height
-        val (cw, ch) = if (srcAspect > targetAspect) {
-            (source.height * targetAspect).roundToInt() to source.height
-        } else {
-            source.width to (source.width / targetAspect).roundToInt()
-        }
-        val x = (source.width - cw) / 2
-        val y = (source.height - ch) / 2
-        val cropped = Bitmap.createBitmap(source, x.coerceAtLeast(0), y.coerceAtLeast(0), cw.coerceAtMost(source.width), ch.coerceAtMost(source.height))
+        val r = thumbnailCrop(source.width, source.height, width, height)
+        val cropped = Bitmap.createBitmap(source, r.left, r.top, r.width(), r.height())
         val scaled = Bitmap.createScaledBitmap(cropped, width, height, true)
         if (cropped !== source && cropped !== scaled) cropped.recycle()
         return scaled
+    }
+
+    /** The centred region of a [srcW] x [srcH] image that [thumbnail] keeps for a [width] x [height] thumbnail. */
+    fun thumbnailCrop(srcW: Int, srcH: Int, width: Int, height: Int): Rect {
+        val targetAspect = width.toFloat() / height
+        val srcAspect = srcW.toFloat() / srcH
+        val (cw, ch) = if (srcAspect > targetAspect) {
+            (srcH * targetAspect).roundToInt() to srcH
+        } else {
+            srcW to (srcW / targetAspect).roundToInt()
+        }
+        val w = cw.coerceIn(1, srcW)
+        val h = ch.coerceIn(1, srcH)
+        val x = ((srcW - w) / 2).coerceAtLeast(0)
+        val y = ((srcH - h) / 2).coerceAtLeast(0)
+        return Rect(x, y, x + w, y + h)
     }
 
     /** Downscaled copy whose longest side is [maxSide] (or the bitmap itself if smaller). */

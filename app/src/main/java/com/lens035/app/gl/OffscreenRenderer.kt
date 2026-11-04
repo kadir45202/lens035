@@ -70,7 +70,8 @@ class OffscreenGl(val pipeline: LensPipeline) {
 
     /**
      * Renders [state] applied to [source] and returns the result as a new bitmap.
-     * [fullWidth]/[fullHeight] describe the original image (for size-dependent effects).
+     * [fullWidth]/[fullHeight] describe the original image (for size-dependent effects);
+     * [personMask] is the person segmentation of the same frame, if known.
      */
     fun render(
         source: Bitmap,
@@ -79,6 +80,7 @@ class OffscreenGl(val pipeline: LensPipeline) {
         dateText: String,
         fullWidth: Int = source.width,
         fullHeight: Int = source.height,
+        personMask: PersonMaskData? = null,
     ): Bitmap {
         val tex = GlUtil.createTexture(source)
         var target: RenderTarget? = null
@@ -91,6 +93,7 @@ class OffscreenGl(val pipeline: LensPipeline) {
                 filmLut = LutCache.film(state.film?.id),
                 customLut = LutCache.custom(state.customLut),
                 dateBitmap = { DateStamp.bitmap(it) },
+                personMask = personMask,
             )
             pipeline.render(
                 PipelineInput(tex, InputKind.TEXTURE_TOP_DOWN, source.width, source.height, version = nextVersion()),
@@ -105,7 +108,13 @@ class OffscreenGl(val pipeline: LensPipeline) {
     }
 
     /** Renders many states over the same small source (thumbnails). */
-    fun renderAll(source: Bitmap, states: List<EditState>, stats: ImageStats, dateText: String): List<Bitmap> {
+    fun renderAll(
+        source: Bitmap,
+        states: List<EditState>,
+        stats: ImageStats,
+        dateText: String,
+        personMask: PersonMaskData? = null,
+    ): List<Bitmap> {
         val tex = GlUtil.createTexture(source)
         val out = RenderTarget(source.width, source.height, false)
         val version = nextVersion()
@@ -114,7 +123,7 @@ class OffscreenGl(val pipeline: LensPipeline) {
                 val s = state.copy(geometry = com.lens035.core.model.Geometry())
                 val ctx = RenderContext(source.width, source.height, source.width, source.height, source.width, source.height)
                 val params = ShaderParams.build(s, ctx, stats, dateText)
-                val res = FrameResources(LutCache.film(s.film?.id), LutCache.custom(s.customLut), { DateStamp.bitmap(it) })
+                val res = FrameResources(LutCache.film(s.film?.id), LutCache.custom(s.customLut), { DateStamp.bitmap(it) }, personMask)
                 pipeline.render(PipelineInput(tex, InputKind.TEXTURE_TOP_DOWN, source.width, source.height, version), params, res, PipelineOutput.Target(out))
                 out.bind()
                 GlUtil.readPixels(source.width, source.height)

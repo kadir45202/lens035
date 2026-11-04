@@ -184,7 +184,7 @@ class VideoSession(
     override suspend fun renderThumbnail(s: EditState): ImageBitmap? {
         val src = thumbSource ?: return null
         return try {
-            app.offscreen.execute { gl -> gl.renderAll(src, listOf(s), stats, dateText) }.first().asImageBitmap()
+            app.offscreen.execute { gl -> gl.renderAll(src, listOf(s.forVideo()), stats, dateText) }.first().asImageBitmap()
         } catch (_: Exception) {
             null
         }
@@ -203,7 +203,7 @@ class VideoSession(
         val s = state
         if (s.isDefault && existing == null) return
         try {
-            val thumb = app.offscreen.execute { gl -> gl.render(src, s.copy(geometry = com.lens035.core.model.Geometry()), stats, dateText) }
+            val thumb = app.offscreen.execute { gl -> gl.render(src, s.forVideo().copy(geometry = com.lens035.core.model.Geometry()), stats, dateText) }
             val now = System.currentTimeMillis()
             app.projects.save(Project(projectId, "video", uri.toString(), existing?.createdAt ?: now, now, s), thumb)
             thumb.recycle()

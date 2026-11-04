@@ -13,6 +13,11 @@ uniform sampler2D u_bloomA;  // 1/4 res, blurred
 uniform sampler2D u_bloomB;  // 1/8 res, blurred
 uniform sampler2D u_bloomC;  // 1/16 res, blurred
 uniform sampler2D u_overlay; // date stamp glyphs (white on transparent)
+uniform sampler2D u_personMaskE; // person segmentation, source space
+uniform float u_hasPersonMaskE;
+uniform sampler2D u_bokehA; // background-only blur, premultiplied (rgb * w, w), 1/4 res
+uniform sampler2D u_bokehB; // 1/8 res
+uniform sampler2D u_bokehC; // 1/16 res
 
 uniform mat3 u_geo;
 uniform vec2 u_outSize;
@@ -35,6 +40,7 @@ uniform vec4 u_fxVhs;
 uniform float u_fxVhsSeed;
 uniform vec4 u_fxPixel;
 uniform vec4 u_fxZoom;
+uniform vec4 u_fxBokeh;   // amount, glow, edge softness
 uniform vec4 u_fxTilt;
 uniform vec4 u_fxRgb;
 uniform vec4 u_fxPrism;
@@ -192,6 +198,23 @@ void main() {
         col = acc / 14.0;
     }
 
+    if (u_fxBokeh.x > 0.0 && u_hasPersonMaskE > 0.5) {
+        // Portrait blur: the person stays sharp, the background comes from a blur pyramid that was
+        // built from background pixels only, so the subject does not bleed into it as a halo.
+        vec2 s = toSrc(q);
+        float person = texture(u_personMaskE, s).r;
+        float edge = mix(0.06, 0.32, u_fxBokeh.z);
+        float fg = smoothstep(0.5 - edge, 0.5 + edge, person);
+        float amt = u_fxBokeh.x;
+        vec4 a = texture(u_bokehA, s);
+        vec4 b = texture(u_bokehB, s);
+        vec4 c = texture(u_bokehC, s);
+        vec4 blur = amt < 0.5 ? mix(a, b, amt * 2.0) : mix(b, c, (amt - 0.5) * 2.0);
+        vec3 bg = blur.a > 0.002 ? blur.rgb / blur.a : col;
+        bg += max(bg - 0.62, 0.0) * u_fxBokeh.y * 1.4;
+        vec3 soft = mix(col, bg, smoothstep(0.0, 0.25, amt));
+        col = mix(soft, col, fg);
+    }
     if (u_fxTilt.x > 0.0) {
         vec2 n = vec2(-sin(u_fxTilt.w), cos(u_fxTilt.w));
         float d = abs(dot((q - vec2(0.5, u_fxTilt.y)) * vec2(gAspect, 1.0), n));

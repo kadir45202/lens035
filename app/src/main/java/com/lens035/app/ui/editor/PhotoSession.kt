@@ -14,17 +14,21 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.lens035.app.Lens035App
 import com.lens035.app.data.Project
 import com.lens035.app.gl.GlException
+import com.lens035.app.gl.PersonMaskData
 import com.lens035.app.media.BitmapLoader
 import com.lens035.app.media.DateStamp
 import com.lens035.app.media.ImageFormat
 import com.lens035.app.media.ImageMeta
 import com.lens035.app.media.MediaSaver
+import com.lens035.app.media.PersonSegmenter
 import com.lens035.core.analysis.ImageAnalyzer
 import com.lens035.core.film.FilmCatalog
 import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
 import com.lens035.core.presets.Looks
 import com.lens035.core.render.FilmDefaults
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,6 +48,16 @@ enum class ExportSize(val label: String, val maxSide: Int) {
 
 data class ExportOptions(val format: ImageFormat, val quality: Int, val size: ExportSize)
 
+/** Progress of the on-device person detection that portrait blur and the person mask rely on. */
+enum class PersonStatus { UNKNOWN, SEARCHING, FOUND, NOT_FOUND, FAILED }
+
+/** The state an effect's thumbnail is rendered with: tiny previews need a stronger setting to read. */
+internal fun thumbnailEffectState(type: EffectType): EditState {
+    val fx = type.defaultInstance(7)
+    val boosted = if (type == EffectType.FRAME || type == EffectType.MIRROR) fx else fx.withValue(type.amountParam, maxOf(fx.amount, 85f))
+    return EditState().withEffect(boosted)
+}
+
 /** Renders the film / effect / look thumbnails for a small source image. */
 internal suspend fun renderToolThumbnails(
     app: Lens035App,
@@ -54,12 +68,7 @@ internal suspend fun renderToolThumbnails(
     val films = FilmCatalog.all
     val filmStates = films.map { EditState(film = FilmDefaults.settingsFor(it)) }
     val effectTypes = EffectType.entries
-    // Thumbnails are tiny, so effects are previewed stronger than their default to read clearly.
-    val effectStates = effectTypes.map { type ->
-        val fx = type.defaultInstance(7)
-        val boosted = if (type == EffectType.FRAME || type == EffectType.MIRROR) fx else fx.withValue(type.amountParam, maxOf(fx.amount, 85f))
-        EditState().withEffect(boosted)
-    }
+    val effectStates = effectTypes.map { thumbnailEffectState(it) }
     val lookStates = Looks.all.map { it.state }
     val all = app.offscreen.execute { gl -> gl.renderAll(thumb, filmStates + effectStates + lookStates, stats, dateText) }
     val f = HashMap<String, ImageBitmap>()
@@ -103,9 +112,18 @@ class PhotoSession(
 
     val dateText: String get() = DateStamp.text(meta.dateTakenMillis)
 
+    /** Where the person is in [preview] (null until found, or when there is nobody). */
+    var personMask by mutableStateOf<PersonMaskData?>(null)
+        private set
+    var personStatus by mutableStateOf(PersonStatus.UNKNOWN)
+        private set
+
     private var thumbSource: Bitmap? = null
+    private var thumbMask: PersonMaskData? = null
     private var histSource: Bitmap? = null
     private var saveJob: Job? = null
+    private var personJob: Job? = null
+    private val thumbnailsDone = CompletableDeferred<Unit>()
 
     fun load() {
         scope.launch {
@@ -136,6 +154,10 @@ class PhotoSession(
                 takePersistablePermission()
                 loading = false
                 renderThumbnails(decoded.bitmap)
+                // Cheap (one small inference), and makes portrait blur and the person mask instant.
+                ensurePersonMask()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Load failed", e)
                 error = "Fotoğraf açılamadı. Dosya silinmiş ya da erişim izni kalkmış olabilir."
@@ -161,17 +183,90 @@ class PhotoSession(
             filmThumbs = f
             effectThumbs = e
             lookThumbs = l
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "Thumbnails failed", e)
+        } finally {
+            thumbnailsDone.complete(Unit)
         }
     }
 
     override suspend fun renderThumbnail(s: EditState): ImageBitmap? {
         val src = thumbSource ?: return null
         return try {
-            app.offscreen.execute { gl -> gl.renderAll(src, listOf(s), stats, dateText) }.first().asImageBitmap()
+            app.offscreen.execute { gl -> gl.renderAll(src, listOf(s), stats, dateText, thumbMask) }.first().asImageBitmap()
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
+        }
+    }
+
+    /** Finds the person in the photo once, on the device. Later calls reuse the result. */
+    fun ensurePersonMask() {
+        val bmp = preview ?: return
+        if (personJob != null) return
+        personJob = scope.launch {
+            personStatus = PersonStatus.SEARCHING
+            val mask = try {
+                val small = withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(bmp, SEGMENT_MAX_SIDE) }
+                val m = PersonSegmenter.segment(small)
+                if (small !== bmp) small.recycle()
+                m
+            } catch (e: CancellationException) {
+                personJob = null
+                personStatus = PersonStatus.UNKNOWN
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Person detection failed", e)
+                null
+            }
+            if (mask == null) {
+                personStatus = PersonStatus.FAILED
+                return@launch
+            }
+            val coverage = withContext(Dispatchers.Default) { mask.coverage }
+            if (coverage < MIN_PERSON_COVERAGE) {
+                personStatus = PersonStatus.NOT_FOUND
+                return@launch
+            }
+            personMask = mask
+            personStatus = PersonStatus.FOUND
+            // Separate job: waiting for exports on this one must not also wait for thumbnails.
+            scope.launch { refreshPortraitThumbnail(bmp, mask) }
+        }
+    }
+
+    /** Waits for person detection when [s] depends on it (export must not miss the blur). */
+    private suspend fun personMaskFor(s: EditState): PersonMaskData? {
+        if (!s.needsPersonMask) return null
+        ensurePersonMask()
+        personJob?.join()
+        return personMask
+    }
+
+    /** Re-renders the portrait thumbnail with the person mask cropped like the thumbnail itself. */
+    private suspend fun refreshPortraitThumbnail(source: Bitmap, mask: PersonMaskData) {
+        thumbnailsDone.await()
+        val thumb = thumbSource ?: return
+        val r = BitmapLoader.thumbnailCrop(source.width, source.height, THUMB_W, THUMB_H)
+        val tm = withContext(Dispatchers.Default) {
+            mask.cropped(
+                r.left / source.width.toFloat(), r.top / source.height.toFloat(),
+                r.right / source.width.toFloat(), r.bottom / source.height.toFloat(),
+            )
+        }
+        thumbMask = tm
+        try {
+            val img = app.offscreen.execute { gl ->
+                gl.renderAll(thumb, listOf(thumbnailEffectState(EffectType.BOKEH)), stats, dateText, tm)
+            }.first()
+            effectThumbs = effectThumbs + (EffectType.BOKEH to img.asImageBitmap())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Portrait thumbnail failed", e)
         }
     }
 
@@ -180,7 +275,8 @@ class PhotoSession(
         val bmp = preview ?: return null
         val src = histSource ?: withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(bmp, 220) }.also { histSource = it }
         return try {
-            val out = app.offscreen.execute { gl -> gl.render(src, s, stats, dateText, meta.width, meta.height) }
+            val mask = if (s.needsPersonMask) personMask else null
+            val out = app.offscreen.execute { gl -> gl.render(src, s, stats, dateText, meta.width, meta.height, mask) }
             withContext(Dispatchers.Default) {
                 val px = IntArray(out.width * out.height)
                 out.getPixels(px, 0, out.width, 0, 0, out.width, out.height)
@@ -197,6 +293,8 @@ class PhotoSession(
                 }
                 h
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             null
         }
@@ -215,14 +313,17 @@ class PhotoSession(
         val s = state
         if (s.isDefault && existing == null) return
         try {
+            val mask = personMaskFor(s)
             val small = withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(bmp, 480) }
-            val thumb = app.offscreen.execute { gl -> gl.render(small, s, stats, dateText, meta.width, meta.height) }
+            val thumb = app.offscreen.execute { gl -> gl.render(small, s, stats, dateText, meta.width, meta.height, mask) }
             if (small !== bmp) small.recycle()
             val now = System.currentTimeMillis()
             val project = Project(projectId, "photo", sourceUri.toString(), existing?.createdAt ?: now, now, s)
             val previewCopy = if (!app.projects.previewFile(projectId).exists()) bmp else null
             app.projects.save(project, thumb, previewCopy)
             thumb.recycle()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "Saving project failed", e)
         }
@@ -231,6 +332,7 @@ class PhotoSession(
     /** Renders at the requested size and saves into the gallery. Returns the new image's Uri. */
     suspend fun export(options: ExportOptions): Uri {
         val s = state
+        val mask = personMaskFor(s)
         val maxTex = app.offscreen.execute { it.maxTextureSize }
         val longest = max(meta.width, meta.height)
         var side = minOf(options.size.maxSide, maxTex, if (longest > 0) longest else options.size.maxSide)
@@ -239,7 +341,9 @@ class PhotoSession(
             try {
                 val decoded = withContext(Dispatchers.IO) { decodeForExport(side) }
                 val rendered = try {
-                    app.offscreen.execute { gl -> gl.render(decoded.bitmap, s, stats, dateText, decoded.bitmap.width, decoded.bitmap.height) }
+                    app.offscreen.execute { gl ->
+                        gl.render(decoded.bitmap, s, stats, dateText, decoded.bitmap.width, decoded.bitmap.height, mask)
+                    }
                 } finally {
                     decoded.bitmap.recycle()
                 }
@@ -270,7 +374,9 @@ class PhotoSession(
 
     fun dispose() {
         saveJob?.cancel()
+        personJob?.cancel()
         thumbSource = null
+        thumbMask = null
         histSource = null
     }
 
@@ -279,5 +385,11 @@ class PhotoSession(
         const val PREVIEW_MAX_SIDE = 2048
         const val THUMB_W = 136
         const val THUMB_H = 168
+
+        /** Segmentation input size: the model itself works at 256 px, so more is wasted time. */
+        const val SEGMENT_MAX_SIDE = 512
+
+        /** Below this share of the frame the "person" is noise (a poster, a reflection). */
+        const val MIN_PERSON_COVERAGE = 0.004f
     }
 }

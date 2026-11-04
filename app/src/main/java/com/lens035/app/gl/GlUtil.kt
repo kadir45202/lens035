@@ -152,6 +152,21 @@ object GlUtil {
         return id
     }
 
+    /** Single-channel GL_R8 texture (e.g. a segmentation mask), rows top-down. */
+    fun createMaskTexture(width: Int, height: Int, data: ByteArray): Int {
+        require(data.size >= width * height)
+        val id = genTexture()
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, id)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
+        val buffer = ByteBuffer.allocateDirect(width * height).order(ByteOrder.nativeOrder())
+        buffer.put(data, 0, width * height)
+        buffer.position(0)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R8, width, height, 0, GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, buffer)
+        setDefaultParams(GLES30.GL_TEXTURE_2D, GLES30.GL_LINEAR)
+        checkError("createMaskTexture")
+        return id
+    }
+
     fun createOesTexture(): Int {
         val id = genTexture()
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, id)

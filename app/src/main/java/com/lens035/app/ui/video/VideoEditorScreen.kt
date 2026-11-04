@@ -119,6 +119,9 @@ import com.lens035.core.model.GeometryMath
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** Photo-only effects: they need person segmentation, which video frames do not get. */
+private val VIDEO_EXCLUDED_EFFECTS = setOf(EffectType.BOKEH)
+
 private enum class VideoTool(val label: String, val icon: ImageVector) {
     FILM("Film", Icons.Rounded.CameraRoll),
     EFFECTS("Efekt", Icons.Rounded.Flare),
@@ -404,7 +407,7 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                     d is VideoDetail.Film -> FilmDetails(session) { detail = null }
                     d is VideoDetail.Effect -> EffectDetails(session, d.type) { detail = null }
                     t == VideoTool.FILM -> FilmsStrip(session) { detail = VideoDetail.Film }
-                    t == VideoTool.EFFECTS -> EffectsStrip(session, null) { detail = VideoDetail.Effect(it) }
+                    t == VideoTool.EFFECTS -> EffectsStrip(session, null, exclude = VIDEO_EXCLUDED_EFFECTS) { detail = VideoDetail.Effect(it) }
                     t == VideoTool.ADJUST -> AdjustTool(
                         session = session,
                         panel = adjustPanel,

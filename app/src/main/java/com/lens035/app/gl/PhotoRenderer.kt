@@ -22,7 +22,7 @@ import javax.microedition.khronos.opengles.GL10
  */
 class PhotoRenderer(private val context: Context, private val view: GLSurfaceView) : GLSurfaceView.Renderer {
 
-    private class Snapshot(
+    private data class Snapshot(
         val source: Bitmap?,
         val sourceVersion: Long,
         val fullWidth: Int,
@@ -31,6 +31,7 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
         val stats: ImageStats,
         val dateText: String,
         val mode: PreviewMode,
+        val personMask: PersonMaskData? = null,
     )
 
     @Volatile
@@ -51,6 +52,7 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
     private var renderedState: EditState? = null
     private var renderedVersion = -1L
     private var renderedMode: PreviewMode? = null
+    private var renderedMaskKey: String? = null
     private var viewWidth = 0
     private var viewHeight = 0
 
@@ -58,27 +60,34 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
 
     fun setSource(bitmap: Bitmap, fullWidth: Int, fullHeight: Int, stats: ImageStats, dateText: String) {
         val s = snapshot
-        snapshot = Snapshot(bitmap, s.sourceVersion + 1, fullWidth, fullHeight, s.state, stats, dateText, s.mode)
+        snapshot = s.copy(source = bitmap, sourceVersion = s.sourceVersion + 1, fullWidth = fullWidth, fullHeight = fullHeight, stats = stats, dateText = dateText)
         view.requestRender()
     }
 
     fun setState(state: EditState) {
         val s = snapshot
         if (s.state == state) return
-        snapshot = Snapshot(s.source, s.sourceVersion, s.fullWidth, s.fullHeight, state, s.stats, s.dateText, s.mode)
+        snapshot = s.copy(state = state)
         view.requestRender()
     }
 
     fun setMode(mode: PreviewMode) {
         val s = snapshot
         if (s.mode == mode) return
-        snapshot = Snapshot(s.source, s.sourceVersion, s.fullWidth, s.fullHeight, s.state, s.stats, s.dateText, mode)
+        snapshot = s.copy(mode = mode)
         view.requestRender()
     }
 
     fun setStats(stats: ImageStats) {
+        snapshot = snapshot.copy(stats = stats)
+        view.requestRender()
+    }
+
+    /** Person segmentation of the source (same frame as [setSource]), or null if none. */
+    fun setPersonMask(mask: PersonMaskData?) {
         val s = snapshot
-        snapshot = Snapshot(s.source, s.sourceVersion, s.fullWidth, s.fullHeight, s.state, stats, s.dateText, s.mode)
+        if (s.personMask === mask) return
+        snapshot = s.copy(personMask = mask)
         view.requestRender()
     }
 
@@ -128,8 +137,11 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
                 renderedState = null
             }
             val state = effectiveState(snap.state, snap.mode)
+            val mask = if (state.needsPersonMask) snap.personMask else null
             var target = finalTarget
-            if (target == null || renderedState != state || renderedVersion != uploadedVersion || renderedMode != snap.mode) {
+            if (target == null || renderedState != state || renderedVersion != uploadedVersion || renderedMode != snap.mode ||
+                renderedMaskKey != mask?.key
+            ) {
                 val out = GeometryMath.outputSize(bmp.width, bmp.height, state.geometry)
                 if (target == null || !target.matches(out.width, out.height, false)) {
                     target?.release()
@@ -142,6 +154,7 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
                     filmLut = LutCache.film(state.film?.id),
                     customLut = LutCache.custom(state.customLut),
                     dateBitmap = { DateStamp.bitmap(it) },
+                    personMask = mask,
                 )
                 p.render(
                     PipelineInput(sourceTex, InputKind.TEXTURE_TOP_DOWN, bmp.width, bmp.height, uploadedVersion),
@@ -150,6 +163,7 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
                 renderedState = state
                 renderedVersion = uploadedVersion
                 renderedMode = snap.mode
+                renderedMaskKey = mask?.key
             }
             val vt = ViewTransform.fit(viewWidth, viewHeight, target.width, target.height, marginPx, zoom, panX, panY)
             p.present(target.texture, viewWidth, viewHeight, vt.toUniform(viewWidth, viewHeight), background)

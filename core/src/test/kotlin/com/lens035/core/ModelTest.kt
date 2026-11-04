@@ -1,6 +1,7 @@
 package com.lens035.core
 
 import com.lens035.core.analysis.ImageAnalyzer
+import com.lens035.core.analysis.ImageStats
 import com.lens035.core.color.CurvePoint
 import com.lens035.core.film.FilmCatalog
 import com.lens035.core.model.AspectRatio
@@ -146,6 +147,43 @@ class ModelTest {
         assertTrue(mirrored.score!! > 0.95f)
         val other = PoseMatcher.match(ref, PoseTemplates.find("jump")!!.skeleton, 0.75f)
         assertTrue("different pose should score lower: ${other.score}", other.score!! < 0.8f)
+    }
+
+    @Test
+    fun personFeaturesRequestTheMaskAndAreStrippedForVideo() {
+        assertFalse(EditState().needsPersonMask)
+        val portrait = EditState().withEffect(EffectType.BOKEH.defaultInstance())
+        assertTrue(portrait.needsPersonMask)
+        val params = ShaderParams.build(portrait, ctx, ImageStats.NEUTRAL, "")
+        assertTrue(params.needsPersonMask)
+        assertTrue(params.needsBokehPyramid)
+
+        val person = LocalMask.newPerson(1)
+        val radial = LocalMask.newRadial(2)
+        val masked = EditState(masks = listOf(person, radial)).withEffect(EffectType.GRAIN.defaultInstance())
+        assertTrue(masked.needsPersonMask)
+        // A disabled person mask needs no segmentation.
+        assertFalse(EditState(masks = listOf(person.copy(enabled = false))).needsPersonMask)
+
+        val video = masked.withEffect(EffectType.BOKEH.defaultInstance()).forVideo()
+        assertFalse(video.needsPersonMask)
+        assertFalse(video.hasEffect(EffectType.BOKEH))
+        assertTrue(video.hasEffect(EffectType.GRAIN))
+        assertEquals(listOf(radial), video.masks)
+        // Nothing to strip: the same instance comes back.
+        val plain = EditState(masks = listOf(radial))
+        assertTrue(plain.forVideo() === plain)
+    }
+
+    @Test
+    fun personMaskSerialisesAndMapsToShaderKind() {
+        val state = EditState(masks = listOf(LocalMask.newPerson(7).copy(invert = true)))
+        val text = json.encodeToString(EditState.serializer(), state)
+        assertTrue(text, text.contains("\"person\""))
+        assertEquals(state, json.decodeFromString(EditState.serializer(), text))
+        val p = ShaderParams.build(state, ctx, ImageStats.NEUTRAL, "")
+        val geo = p.main["u_maskGeo"] as UniformValue.V4Array
+        assertEquals(2f, geo.data[0], 0f)
     }
 
     @Test

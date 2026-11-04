@@ -40,12 +40,43 @@ class PipelineInput(
     val transfer: Int = Transfer.SDR,
 )
 
+/** A person segmentation mask in source-image space (rows top-down), confidence 0..255. */
+class PersonMaskData(val width: Int, val height: Int, val data: ByteArray, val key: String) {
+    init {
+        require(width > 0 && height > 0 && data.size >= width * height)
+    }
+
+    /** Fraction of the frame covered by the person (confidence > 50%). */
+    val coverage: Float by lazy {
+        var n = 0
+        for (i in 0 until width * height) if ((data[i].toInt() and 0xFF) > 127) n++
+        n / (width * height).toFloat()
+    }
+
+    /** The part of the mask under a normalised rectangle (for centre-cropped thumbnails). */
+    fun cropped(left: Float, top: Float, right: Float, bottom: Float): PersonMaskData {
+        val cw = max(1, ((right - left) * width).roundToInt())
+        val ch = max(1, ((bottom - top) * height).roundToInt())
+        val out = ByteArray(cw * ch)
+        for (y in 0 until ch) {
+            val sy = ((top + (y + 0.5f) / ch * (bottom - top)) * height).toInt().coerceIn(0, height - 1)
+            for (x in 0 until cw) {
+                val sx = ((left + (x + 0.5f) / cw * (right - left)) * width).toInt().coerceIn(0, width - 1)
+                out[y * cw + x] = data[sy * width + sx]
+            }
+        }
+        return PersonMaskData(cw, ch, out, "$key@$left,$top,$right,$bottom")
+    }
+}
+
 /** Per-frame resources referenced by [RenderParams]. */
 class FrameResources(
     val filmLut: Lut3D?,
     val customLut: Lut3D?,
     /** Supplies the date stamp glyph bitmap when the date effect is active. */
     val dateBitmap: ((text: String) -> Bitmap)? = null,
+    /** Person segmentation of the source, when available (photos). */
+    val personMask: PersonMaskData? = null,
 )
 
 /** Where the effects pass draws. */
@@ -69,6 +100,7 @@ class LensPipeline(private val sources: ShaderSources) {
     private lateinit var mainProgram: ShaderProgram
     private lateinit var effectsProgram: ShaderProgram
     private lateinit var presentProgram: ShaderProgram
+    private lateinit var downMaskedProgram: ShaderProgram
 
     private var vao = 0
     private var vbo = 0
@@ -79,6 +111,9 @@ class LensPipeline(private val sources: ShaderSources) {
     private var dummyLut = 0
     private var dummyCurves = 0
     private var dummyOverlay = 0
+    private var dummyMask = 0
+    private var personTex = 0
+    private var personKey: String? = null
 
     private var lutTex = 0
     private var lutKey: String? = null
@@ -96,6 +131,8 @@ class LensPipeline(private val sources: ShaderSources) {
     private val pyrATmp = arrayOfNulls<RenderTarget>(LEVELS)
     private val pyrB = arrayOfNulls<RenderTarget>(LEVELS)
     private val pyrBTmp = arrayOfNulls<RenderTarget>(LEVELS)
+    private val pyrP = arrayOfNulls<RenderTarget>(LEVELS)
+    private val pyrPTmp = arrayOfNulls<RenderTarget>(LEVELS)
     private var graded: RenderTarget? = null
     private var pyrAKey: String? = null
 
@@ -111,6 +148,7 @@ class LensPipeline(private val sources: ShaderSources) {
         mainProgram = ShaderProgram(vert, sources["main.frag"], "main")
         effectsProgram = ShaderProgram(vert, sources["effects.frag"], "effects")
         presentProgram = ShaderProgram(vert, sources["present.frag"], "present")
+        downMaskedProgram = ShaderProgram(vert, sources["down_masked.frag"], "down_masked")
 
         val ids = IntArray(1)
         GLES30.glGenVertexArrays(1, ids, 0)
@@ -131,18 +169,19 @@ class LensPipeline(private val sources: ShaderSources) {
         dummyLut = GlUtil.createTexture3D(2, Lut3D.identity(2).toRgbaHalf())
         dummyCurves = GlUtil.createFloatTexture(256, 1, ShaderParams.curveTable(com.lens035.core.model.Curves()))
         dummyOverlay = GlUtil.createTexture(1, 1, false)
+        dummyMask = GlUtil.createMaskTexture(1, 1, byteArrayOf(0))
         GlUtil.checkError("LensPipeline.init")
         initialized = true
     }
 
     fun release() {
         if (!initialized) return
-        listOf(importProgram, importOesProgram, downProgram, blurProgram, mainProgram, effectsProgram, presentProgram).forEach { it.release() }
+        listOf(importProgram, importOesProgram, downProgram, blurProgram, mainProgram, effectsProgram, presentProgram, downMaskedProgram).forEach { it.release() }
         GLES30.glDeleteVertexArrays(1, intArrayOf(vao), 0)
         GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0)
-        listOf(dummyLut, dummyCurves, dummyOverlay, lutTex, lut2Tex, curvesTex, overlayTex).forEach { GlUtil.deleteTexture(it) }
-        lutTex = 0; lut2Tex = 0; curvesTex = 0; overlayTex = 0
-        lutKey = null; lut2Key = null; curvesKey = null; overlayKey = null
+        listOf(dummyLut, dummyCurves, dummyOverlay, dummyMask, lutTex, lut2Tex, curvesTex, overlayTex, personTex).forEach { GlUtil.deleteTexture(it) }
+        lutTex = 0; lut2Tex = 0; curvesTex = 0; overlayTex = 0; personTex = 0
+        lutKey = null; lut2Key = null; curvesKey = null; overlayKey = null; personKey = null
         releaseTargets()
         initialized = false
     }
@@ -155,6 +194,8 @@ class LensPipeline(private val sources: ShaderSources) {
             pyrATmp[i]?.release(); pyrATmp[i] = null
             pyrB[i]?.release(); pyrB[i] = null
             pyrBTmp[i]?.release(); pyrBTmp[i] = null
+            pyrP[i]?.release(); pyrP[i] = null
+            pyrPTmp[i]?.release(); pyrPTmp[i] = null
         }
         pyrAKey = null
     }
@@ -233,11 +274,19 @@ class LensPipeline(private val sources: ShaderSources) {
         mainProgram.bindTexture("u_lut2", 6, GLES30.GL_TEXTURE_3D, if (res.customLut != null) lut2Tex else dummyLut)
         mainProgram.set1f("u_lut2Size", if (res.customLut != null) lut2Size else 2f)
         mainProgram.bindTexture("u_curves", 7, GLES30.GL_TEXTURE_2D, curvesTexture(params))
+        val mask = if (params.needsPersonMask) personMaskTexture(res.personMask) else 0
+        mainProgram.bindTexture("u_personMask", 8, GLES30.GL_TEXTURE_2D, if (mask != 0) mask else dummyMask)
+        mainProgram.set1f("u_hasPersonMask", if (mask != 0) 1f else 0f)
         drawQuad(mainProgram, false)
 
         // 4. Bloom pyramid of the graded image, only when an effect needs it.
         if (params.needsBloomPyramid) {
             buildPyramid(g.texture, w, h, pyrB, pyrBTmp, firstLevelLuma = false)
+        }
+        // Portrait blur has to know where the person is; without a mask it stays off.
+        val bokeh = params.needsBokehPyramid && mask != 0
+        if (bokeh) {
+            buildBokehPyramid(g.texture, mask, w, h)
         }
 
         // 5. Effects into the output.
@@ -262,6 +311,11 @@ class LensPipeline(private val sources: ShaderSources) {
         effectsProgram.bindTexture("u_bloomB", 3, GLES30.GL_TEXTURE_2D, if (bloom) pyrB[2]!!.texture else g.texture)
         effectsProgram.bindTexture("u_bloomC", 4, GLES30.GL_TEXTURE_2D, if (bloom) pyrB[3]!!.texture else g.texture)
         effectsProgram.bindTexture("u_overlay", 5, GLES30.GL_TEXTURE_2D, overlayTexture(params, res))
+        effectsProgram.bindTexture("u_personMaskE", 6, GLES30.GL_TEXTURE_2D, if (mask != 0) mask else dummyMask)
+        effectsProgram.set1f("u_hasPersonMaskE", if (mask != 0) 1f else 0f)
+        effectsProgram.bindTexture("u_bokehA", 7, GLES30.GL_TEXTURE_2D, if (bokeh) pyrP[1]!!.texture else g.texture)
+        effectsProgram.bindTexture("u_bokehB", 8, GLES30.GL_TEXTURE_2D, if (bokeh) pyrP[2]!!.texture else g.texture)
+        effectsProgram.bindTexture("u_bokehC", 9, GLES30.GL_TEXTURE_2D, if (bokeh) pyrP[3]!!.texture else g.texture)
         drawQuad(effectsProgram, flip)
         if (output is PipelineOutput.Target) output.target.generateMipmaps()
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
@@ -321,6 +375,56 @@ class LensPipeline(private val sources: ShaderSources) {
             pw = lw
             ph = lh
         }
+    }
+
+    /** Background-only (premultiplied) blur pyramid of the graded image for portrait blur. */
+    private fun buildBokehPyramid(graded: Int, mask: Int, w: Int, h: Int) {
+        var prevTex = graded
+        var pw = w
+        var ph = h
+        for (i in 0 until LEVELS) {
+            val lw = max(1, (pw / 2f).roundToInt())
+            val lh = max(1, (ph / 2f).roundToInt())
+            val t = ensure(pyrP[i], lw, lh, hdrTargets).also { pyrP[i] = it }
+            t.bind()
+            if (i == 0) {
+                downMaskedProgram.use()
+                downMaskedProgram.bindTexture("u_tex", 0, GLES30.GL_TEXTURE_2D, prevTex)
+                downMaskedProgram.bindTexture("u_mask", 1, GLES30.GL_TEXTURE_2D, if (mask != 0) mask else dummyMask)
+                downMaskedProgram.set1f("u_hasMask", if (mask != 0) 1f else 0f)
+                downMaskedProgram.set2f("u_texel", 1f / pw, 1f / ph)
+                drawQuad(downMaskedProgram, false)
+            } else {
+                downProgram.use()
+                downProgram.bindTexture("u_tex", 0, GLES30.GL_TEXTURE_2D, prevTex)
+                downProgram.set2f("u_texel", 1f / pw, 1f / ph)
+                downProgram.set1f("u_lumaAlpha", 0f)
+                drawQuad(downProgram, false)
+                val tmp = ensure(pyrPTmp[i], lw, lh, hdrTargets).also { pyrPTmp[i] = it }
+                tmp.bind()
+                blurProgram.use()
+                blurProgram.bindTexture("u_tex", 0, GLES30.GL_TEXTURE_2D, t.texture)
+                blurProgram.set2f("u_dir", 1f / lw, 0f)
+                drawQuad(blurProgram, false)
+                t.bind()
+                blurProgram.bindTexture("u_tex", 0, GLES30.GL_TEXTURE_2D, tmp.texture)
+                blurProgram.set2f("u_dir", 0f, 1f / lh)
+                drawQuad(blurProgram, false)
+            }
+            prevTex = t.texture
+            pw = lw
+            ph = lh
+        }
+    }
+
+    private fun personMaskTexture(m: PersonMaskData?): Int {
+        if (m == null) return 0
+        if (m.key != personKey || personTex == 0) {
+            GlUtil.deleteTexture(personTex)
+            personTex = GlUtil.createMaskTexture(m.width, m.height, m.data)
+            personKey = m.key
+        }
+        return personTex
     }
 
     private fun bindLut(lut: Lut3D?) {

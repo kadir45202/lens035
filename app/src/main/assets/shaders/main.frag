@@ -72,11 +72,21 @@ uniform int u_maskCount;
 uniform vec4 u_maskGeo[8];
 uniform vec4 u_maskAdj[12];
 
+uniform sampler2D u_personMask; // person segmentation (source space, r = confidence)
+uniform float u_hasPersonMask;
+
+float personAt(vec2 uv) {
+    return u_hasPersonMask > 0.5 ? texture(u_personMask, uv).r : 0.0;
+}
+
 float maskWeight(vec4 g0, vec4 g1, vec2 uv) {
     vec2 asp = vec2(u_aspect, 1.0);
     vec2 p = uv * asp;
     float w;
-    if (g0.x < 0.5) {
+    if (g0.x > 1.5) {
+        float f = clamp(g0.z, 0.0, 1.0) * 0.45 + 0.02;
+        w = smoothstep(0.5 - f, 0.5 + f, personAt(uv));
+    } else if (g0.x < 0.5) {
         vec2 a = g1.xy * asp;
         vec2 b = g1.zw * asp;
         vec2 ab = b - a;
@@ -317,6 +327,8 @@ void main() {
         float detail = srcP - p2.a;
         float keepEdges = 1.0 - smoothstep(0.05, 0.14, abs(detail));
         float a = u_skin * m * keepEdges;
+        // With a person mask, keep the smoothing on the person (not on wood, sand or walls).
+        if (u_hasPersonMask > 0.5) a *= smoothstep(0.2, 0.6, personAt(uv));
         float Pc = perceptualLuma(enc);
         float smoothP = Pc - detail * a * 0.9 + (p1.a - srcP) * a * 0.3;
         enc = withPerceptualLuma(enc, Pc, smoothP + 0.02 * a);

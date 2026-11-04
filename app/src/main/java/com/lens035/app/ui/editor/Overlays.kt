@@ -1,5 +1,8 @@
 package com.lens035.app.ui.editor
 
+import android.graphics.Bitmap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -17,10 +20,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.lens035.app.gl.PersonMaskData
 import com.lens035.app.gl.ViewTransform
 import com.lens035.app.ui.theme.LensColors
 import com.lens035.core.model.CropRect
@@ -217,6 +226,53 @@ class SourceViewMapper(
 }
 
 private enum class MaskHandle { NONE, CENTER, A, B, RX, RY }
+
+/**
+ * Briefly tints what a person mask selects (the detected person, or everything else when
+ * [inverted]) so the selection is visible; it fades out on its own when [visible] turns false.
+ */
+@Composable
+fun PersonMaskTint(mapper: SourceViewMapper, vt: ViewTransform, mask: PersonMaskData, inverted: Boolean, visible: Boolean) {
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(if (visible) 160 else 650),
+        label = "personTint",
+    )
+    if (alpha <= 0.001f) return
+    val tint = remember(mask.key, inverted) { personTintBitmap(mask, inverted).asImageBitmap() }
+    val matrix = remember { Matrix() }
+    Canvas(Modifier.fillMaxSize()) {
+        // Source corners through the edit geometry; the mapping is affine, so three points fix it.
+        val p0 = mapper.toView(0f, 0f)
+        val p1 = mapper.toView(1f, 0f)
+        val p2 = mapper.toView(0f, 1f)
+        val w = tint.width.toFloat()
+        val h = tint.height.toFloat()
+        matrix.reset()
+        matrix.values[Matrix.ScaleX] = (p1.x - p0.x) / w
+        matrix.values[Matrix.SkewY] = (p1.y - p0.y) / w
+        matrix.values[Matrix.SkewX] = (p2.x - p0.x) / h
+        matrix.values[Matrix.ScaleY] = (p2.y - p0.y) / h
+        matrix.values[Matrix.TranslateX] = p0.x
+        matrix.values[Matrix.TranslateY] = p0.y
+        clipRect(vt.left, vt.top, vt.right, vt.bottom) {
+            withTransform({ transform(matrix) }) {
+                drawImage(tint, alpha = alpha * 0.6f)
+            }
+        }
+    }
+}
+
+private fun personTintBitmap(mask: PersonMaskData, inverted: Boolean): Bitmap {
+    val rgb = LensColors.Accent.toArgb() and 0xFFFFFF
+    val px = IntArray(mask.width * mask.height)
+    for (i in px.indices) {
+        val c = mask.data[i].toInt() and 0xFF
+        val a = if (inverted) 255 - c else c
+        px[i] = (a shl 24) or rgb
+    }
+    return Bitmap.createBitmap(px, mask.width, mask.height, Bitmap.Config.ARGB_8888)
+}
 
 /** On-canvas editor for one local mask. */
 @Composable

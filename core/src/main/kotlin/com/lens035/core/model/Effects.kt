@@ -96,6 +96,12 @@ enum class EffectType(
         listOf(amount(40f), p("x", "Merkez X", 50f), p("y", "Merkez Y", 50f), p("clear", "Net alan", 30f)),
     ),
 
+    @SerialName("bokeh")
+    BOKEH(
+        "Portre", EffectCategory.LENS, "Kişiyi net bırakıp arka planı bulanıklaştırır (yalnız fotoğraf).",
+        listOf(amount(65f), p("glow", "Işık topları", 30f), p("edge", "Kenar yumuşaklığı", 45f)),
+    ),
+
     @SerialName("tilt_shift")
     TILT_SHIFT(
         "Tilt-Shift", EffectCategory.LENS, "Minyatür etkisi için seçici odak.",

@@ -84,6 +84,7 @@ import com.lens035.app.ui.theme.LensType
 import com.lens035.core.lut.CubeParser
 import com.lens035.core.model.EffectType
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.model.MaskKind
 import com.lens035.core.presets.Look
 import com.lens035.core.presets.Looks
 import kotlinx.coroutines.Dispatchers
@@ -159,6 +160,21 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
         if (!showHistogram) return@LaunchedEffect
         delay(220)
         histogram = session.histogram(session.state)
+    }
+    // Portrait blur, skin smoothing and person masks need to know where the person is.
+    val needsPerson = session.state.needsPersonMask
+    LaunchedEffect(needsPerson, session.preview) {
+        if (needsPerson && session.preview != null) session.ensurePersonMask()
+    }
+    // Show what a person mask selects for a moment whenever it is picked or inverted.
+    val activeMask = session.state.masks.firstOrNull { it.id == selectedMask }
+    var personTintVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(tool, activeMask?.id, activeMask?.invert, session.personMask) {
+        if (tool == EditorTool.MASKS && activeMask?.kind == MaskKind.PERSON && session.personMask != null) {
+            personTintVisible = true
+            delay(1400)
+        }
+        personTintVisible = false
     }
 
     fun doExport() {
@@ -271,7 +287,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                         )
                     }
                     EditorTool.MASKS -> {
-                        val mask = session.state.masks.firstOrNull { it.id == selectedMask }
+                        val mask = activeMask
                         val bmp = session.preview
                         if (mask != null && bmp != null && !comparing) {
                             val g = session.state.geometry
@@ -281,13 +297,18 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                                 GeometryMath.outputToSourceRowMajor(bmp.width, bmp.height, g),
                                 bmp.width.toFloat() / bmp.height,
                             )
-                            MaskOverlay(
-                                mapper = mapper,
-                                mask = mask,
-                                onChange = { m -> session.preview(session.state.copy(masks = session.state.masks.map { if (it.id == m.id) m else it })) },
-                                onGestureStart = { session.beginGesture() },
-                                onGestureEnd = { session.endGesture() },
-                            )
+                            if (mask.kind == MaskKind.PERSON) {
+                                // Nothing to drag: the selection comes from detection. Show it instead.
+                                session.personMask?.let { pm -> PersonMaskTint(mapper, vt, pm, mask.invert, personTintVisible) }
+                            } else {
+                                MaskOverlay(
+                                    mapper = mapper,
+                                    mask = mask,
+                                    onChange = { m -> session.preview(session.state.copy(masks = session.state.masks.map { if (it.id == m.id) m else it })) },
+                                    onGestureStart = { session.beginGesture() },
+                                    onGestureEnd = { session.endGesture() },
+                                )
+                            }
                         }
                     }
                     else -> Unit
@@ -298,6 +319,18 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
             }
             session.error?.let { msg ->
                 Text(msg, style = LensType.Body, color = LensColors.Muted, modifier = Modifier.align(Alignment.Center).padding(32.dp))
+            }
+            val usesPerson = session.state.hasEffect(EffectType.BOKEH) ||
+                session.state.masks.any { it.enabled && it.kind == MaskKind.PERSON }
+            val personMessage = if (usesPerson && !session.loading) personStatusText(session.personStatus) else null
+            if (!comparing && personMessage != null) {
+                Text(
+                    personMessage,
+                    style = LensType.Label,
+                    color = LensColors.Text,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), LensShapes.Pill).padding(horizontal = 12.dp, vertical = 5.dp),
+                )
             }
             if (comparing) {
                 Text(
@@ -369,7 +402,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                             },
                         )
                         t == EditorTool.CROP -> CropTool(session)
-                        t == EditorTool.MASKS -> MaskTool(session, selectedMask) { selectedMask = it }
+                        t == EditorTool.MASKS -> MaskTool(session, selectedMask, { selectedMask = it }, personStatus = session.personStatus)
                     }
                 }
             }

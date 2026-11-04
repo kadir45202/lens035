@@ -68,7 +68,8 @@ class VideoRenderer(
     }
 
     fun setState(value: EditState) {
-        state = value
+        // Video frames have no person segmentation: portrait blur and person masks are photo-only.
+        state = value.forVideo()
         view.requestRender()
     }
 

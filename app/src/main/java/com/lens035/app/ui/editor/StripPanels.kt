@@ -175,10 +175,16 @@ fun SliderItem(
 
 private val effectFilters: List<EffectCategory?> = listOf(null) + EffectCategory.entries
 
+/** Effect tiles by category. [exclude] hides effects the medium cannot do (portrait blur in video). */
 @Composable
-fun EffectsStrip(session: EditSession, focused: EffectType?, onDetails: (EffectType) -> Unit) {
+fun EffectsStrip(
+    session: EditSession,
+    focused: EffectType?,
+    exclude: Set<EffectType> = emptySet(),
+    onDetails: (EffectType) -> Unit,
+) {
     var category by remember { mutableStateOf<EffectCategory?>(null) }
-    val types = EffectType.entries.filter { category == null || it.category == category }
+    val types = EffectType.entries.filter { (category == null || it.category == category) && it !in exclude }
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         ChipRow(effectFilters, category, { it?.label ?: "Tümü" }, { category = it })
         Spacer(Modifier.height(10.dp))

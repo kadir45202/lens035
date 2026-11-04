@@ -114,7 +114,7 @@ class ShaderSources private constructor(private val map: Map<String, String>) {
     companion object {
         private val NAMES = listOf(
             "quad.vert", "common.glsl", "import2d.frag", "import_oes.frag", "down.frag",
-            "blur.frag", "main.frag", "effects.frag", "present.frag",
+            "blur.frag", "main.frag", "effects.frag", "present.frag", "down_masked.frag",
         )
 
         @Volatile

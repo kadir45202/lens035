@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.lens035.app.gl.EglCore
 import com.lens035.app.gl.LensPipeline
 import com.lens035.app.gl.OffscreenGl
+import com.lens035.app.gl.PersonMaskData
 import com.lens035.app.gl.ShaderSources
 import com.lens035.core.analysis.ImageStats
 import com.lens035.core.film.FilmCatalog
@@ -16,6 +17,7 @@ import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
 import com.lens035.core.model.Geometry
 import com.lens035.core.model.LightSettings
+import com.lens035.core.model.LocalAdjust
 import com.lens035.core.model.LocalMask
 import com.lens035.core.presets.Looks
 import com.lens035.core.render.FilmDefaults
@@ -137,6 +139,49 @@ class PipelineInstrumentedTest {
             val l = meanLuma(render(look.state))
             assertTrue("${look.id} produced a blank image ($l)", l in 3f..252f)
         }
+    }
+
+    /** Person on the left half of the frame, background on the right. */
+    private fun leftHalfPerson(): PersonMaskData {
+        val w = 60
+        val h = 45
+        val data = ByteArray(w * h) { i -> if (i % w < w / 2) 255.toByte() else 0 }
+        return PersonMaskData(w, h, data, "test-left-half")
+    }
+
+    private fun pixelDiff(a: Bitmap, b: Bitmap, x: Int, y: Int): Int {
+        val ca = a.getPixel(x, y)
+        val cb = b.getPixel(x, y)
+        return maxOf(abs(Color.red(ca) - Color.red(cb)), abs(Color.green(ca) - Color.green(cb)), abs(Color.blue(ca) - Color.blue(cb)))
+    }
+
+    @Test
+    fun portraitBlurKeepsThePersonAndNeedsAMask() {
+        val portrait = EditState().withEffect(EffectType.BOKEH.defaultInstance().withValue(EffectType.BOKEH.amountParam, 100f))
+        val stats = ImageStats.NEUTRAL
+        // The grey ramp band in the middle has hard edges above and below: blur smears it.
+        val y = (source.height * 0.5f).toInt()
+        val personX = (source.width * 0.2f).toInt()
+        val backgroundX = (source.width * 0.8f).toInt()
+
+        val blurred = gl.render(source, portrait, stats, "", personMask = leftHalfPerson())
+        assertTrue("person must stay sharp", pixelDiff(blurred, source, personX, y) <= 6)
+        assertTrue("background must be blurred", pixelDiff(blurred, source, backgroundX, y) > 12)
+
+        // Without segmentation there is no subject to keep, so the effect stays off.
+        val noMask = gl.render(source, portrait, stats, "")
+        assertTrue(pixelDiff(noMask, source, backgroundX, y) <= 3)
+    }
+
+    @Test
+    fun personMaskAdjustsOnlyThePerson() {
+        val state = EditState(masks = listOf(LocalMask.newPerson(1).copy(adjust = LocalAdjust(exposure = 1.5f))))
+        val out = gl.render(source, state, ImageStats.NEUTRAL, "", personMask = leftHalfPerson())
+        val y = (source.height * 0.2f).toInt()
+        val left = out.getPixel((source.width * 0.2f).toInt(), y)
+        val leftSrc = source.getPixel((source.width * 0.2f).toInt(), y)
+        assertTrue("person side should be brighter", Color.green(left) > Color.green(leftSrc) + 10)
+        assertTrue("background side should be untouched", pixelDiff(out, source, (source.width * 0.8f).toInt(), y) <= 3)
     }
 
     @Test
