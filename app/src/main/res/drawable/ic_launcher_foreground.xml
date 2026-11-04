@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lens035 mark: a lens ring with a warm halation crescent and a highlight point.
+     Drawn inside the 66dp safe zone of the 108dp adaptive icon canvas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- outer ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#F2EEE8"
+        android:strokeWidth="3.2"
+        android:pathData="M54,30 A24,24 0 1,1 53.99,30 Z" />
+    <!-- halation crescent -->
+    <path
+        android:fillColor="#FF5B22"
+        android:pathData="M54,36 A18,18 0 1,0 72,54 A14,14 0 1,1 54,36 Z" />
+    <!-- highlight point -->
+    <path
+        android:fillColor="#F2EEE8"
+        android:pathData="M61,47 m-4.2,0 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0" />
+</vector>
