@@ -101,7 +101,10 @@ import com.lens035.app.ui.components.LensSheet
 import com.lens035.app.ui.components.PrimaryPill
 import com.lens035.app.ui.components.ToolTab
 import com.lens035.app.Lens035App
+import com.lens035.app.data.HintStore
 import com.lens035.app.data.UserPreset
+import com.lens035.app.ui.components.HintHost
+import com.lens035.app.ui.components.rememberHintQueue
 import com.lens035.app.ui.editor.AdjustPanel
 import com.lens035.app.ui.editor.AdjustTool
 import com.lens035.app.ui.editor.CropOverlay
@@ -220,6 +223,8 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
         session.load()
         app.presets.load()
     }
+    val hints = rememberHintQueue(HintStore.VIDEO_BASICS)
+    LaunchedEffect(tool) { if (tool == VideoTool.TRIM) hints.done(HintStore.VIDEO_BASICS) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -405,6 +410,14 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                 }
             }
             session.error?.let { Text(it, style = LensType.Body, color = LensColors.Muted, modifier = Modifier.align(Alignment.Center)) }
+            HintHost(
+                queue = hints,
+                texts = mapOf(
+                    HintStore.VIDEO_BASICS to "Görünüm, film ve efektler videonun tamamına uygulanır. Kısaltmak ya da hızı değiştirmek için Kes sekmesine geç.",
+                ),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                visible = session.error == null && detail == null && !comparing && tool != VideoTool.CROP,
+            )
             if (comparing) {
                 Text(
                     "Orijinal", style = LensType.Label, color = LensColors.Text,

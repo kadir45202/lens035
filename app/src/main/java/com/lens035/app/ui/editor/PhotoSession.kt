@@ -48,9 +48,6 @@ enum class ExportSize(val label: String, val maxSide: Int) {
 
 data class ExportOptions(val format: ImageFormat, val quality: Int, val size: ExportSize)
 
-/** Progress of the on-device person detection that portrait blur and the person mask rely on. */
-enum class PersonStatus { UNKNOWN, SEARCHING, FOUND, NOT_FOUND, FAILED }
-
 /** The state an effect's thumbnail is rendered with: tiny previews need a stronger setting to read. */
 internal fun thumbnailEffectState(type: EffectType): EditState {
     val fx = type.defaultInstance(7)

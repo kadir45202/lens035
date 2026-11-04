@@ -70,9 +70,12 @@ import com.lens035.app.gl.LutCache
 import com.lens035.app.gl.PreviewMode
 import com.lens035.app.media.ImageFormat
 import com.lens035.app.media.MediaSaver
+import com.lens035.app.data.HintStore
+import com.lens035.app.ui.components.HintHost
 import com.lens035.app.ui.components.LensIconButton
 import com.lens035.app.ui.components.PrimaryPill
 import com.lens035.app.ui.components.ToolTab
+import com.lens035.app.ui.components.rememberHintQueue
 import com.lens035.app.ui.nav.Navigator
 import com.lens035.app.ui.nav.Screen
 import com.lens035.app.ui.theme.LensColors
@@ -159,6 +162,10 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
         delay(220)
         histogram = session.histogram(session.state)
     }
+    // First-run tips; each disappears for good once read or once the person does what it says.
+    val hints = rememberHintQueue(HintStore.PHOTO_STRIP, HintStore.PHOTO_COMPARE)
+    LaunchedEffect(session.canUndo) { if (session.canUndo) hints.done(HintStore.PHOTO_STRIP) }
+    LaunchedEffect(comparing) { if (comparing) hints.done(HintStore.PHOTO_COMPARE) }
     // Portrait blur, skin smoothing and person masks need to know where the person is.
     val needsPerson = session.state.needsPersonMask
     LaunchedEffect(needsPerson, session.preview) {
@@ -343,6 +350,18 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
             if (showHistogram) {
                 histogram?.let { Histogram(it, Modifier.align(Alignment.TopStart).padding(12.dp)) }
             }
+            HintHost(
+                queue = hints,
+                texts = mapOf(
+                    HintStore.PHOTO_STRIP to "Bir filme ya da efekte dokun, hemen uygulanır. Seçiliyken yeniden dokun ya da köşedeki oka bas: ince ayarlar açılır.",
+                    HintStore.PHOTO_COMPARE to "Orijinali görmek için fotoğrafa basılı tut. İki parmakla ya da çift dokunarak yakınlaştırabilirsin.",
+                ),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                visible = !session.loading && session.error == null && detail == null && !comparing && when (hints.current) {
+                    HintStore.PHOTO_STRIP -> tool == EditorTool.FILM || tool == EditorTool.LOOKS || tool == EditorTool.EFFECTS
+                    else -> tool != EditorTool.CROP && tool != EditorTool.MASKS
+                },
+            )
         }
 
         // ------------------------------------------------------------------ tool area

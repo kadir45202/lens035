@@ -102,6 +102,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.pose.PoseDetection
 import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
+import com.lens035.app.data.HintStore
+import com.lens035.app.ui.components.HintHost
+import com.lens035.app.ui.components.rememberHintQueue
 import com.lens035.app.media.BitmapLoader
 import com.lens035.app.media.MediaSaver
 import com.lens035.app.ui.components.ChipRow
@@ -216,6 +219,9 @@ private fun CameraContent(navigator: Navigator) {
     var flash by remember { mutableStateOf(false) }
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
     var matchedSince by remember { mutableLongStateOf(0L) }
+    val hints = rememberHintQueue(HintStore.POSE_BASICS)
+    val poseMatched = (match?.score ?: 0f) >= 0.85f
+    LaunchedEffect(poseMatched) { if (poseMatched) hints.done(HintStore.POSE_BASICS) }
     var lastAuto by remember { mutableLongStateOf(0L) }
 
     val previewView = remember {
@@ -449,6 +455,14 @@ private fun CameraContent(navigator: Navigator) {
                     Text(text, style = LensType.Label, color = if (matched) LensColors.Positive else LensColors.Text, textAlign = TextAlign.Center)
                 }
             }
+            HintHost(
+                queue = hints,
+                texts = mapOf(
+                    HintStore.POSE_BASICS to "Soluk silüet referansın: kişiyi ona göre yönlendir. Uyum %85'i geçince silüet yeşile döner.",
+                ),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                visible = reference !is Reference.None && countdown == null,
+            )
             countdown?.let {
                 Text("$it", style = LensType.Display.copy(fontSize = LensType.Display.fontSize * 3), color = LensColors.Text, modifier = Modifier.align(Alignment.Center))
             }
