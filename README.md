@@ -9,7 +9,7 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
 ### Fotoğraf
 - **Görünümler:** Film, efekt ve ışık ayarlarını birlikte uygulayan 14 hazır görünüm (Yaz '98, Neon Gece, Sinematik, Anı…). Yoğunluk sürgüsü var. Kendi ön ayarlarını da kaydedebilirsin.
 - **32 film profili:** Renkli negatif, diya, sinema, anlık, siyah-beyaz ve deneysel. Her filmin kendi ton eğrisi, renk kaymaları, doygunluk karakteri ve gren, halation, parlama, vinyet varsayılanları var. Ok ile yoğunluk, gren, halation, parlama, solgunluk, vinyet ve sıcaklık ayarlanır.
-- **23 yaratıcı efekt:** Grain, toz, ışık sızıntısı, halation, parıltı, Kira yıldızları, güneş ışını, prizma, holo, VHS, glitch, RGB kayma, CRT, piksel, poster, duotone, balıkgözü, tilt-shift, zoom bulanıklığı, rüya, ayna, tarih damgası ve anlık fotoğraf çerçevesi. Efektler üst üste uygulanabilir ve her birinin kendi parametreleri var.
+- **24 yaratıcı efekt:** Grain, toz, ışık sızıntısı, halation, parıltı, Kira yıldızları, güneş ışını, prizma, holo, VHS, glitch, RGB kayma, CRT, piksel, poster, duotone, balıkgözü, portre bulanıklığı, tilt-shift, zoom bulanıklığı, rüya, ayna, tarih damgası ve anlık fotoğraf çerçevesi. Efektler üst üste uygulanabilir ve her birinin kendi parametreleri var.
 - **Lightroom tarzı ayarlar:**
   - Işık: pozlama, kontrast, açık tonlar, gölgeler, beyazlar, siyahlar
   - Renk: sıcaklık, renk tonu, canlılık, doygunluk
@@ -18,16 +18,17 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
   - Detay: keskinleştirme ve parazit azaltma
   - Efektler: doku, netlik, pus giderme, vinyet, gren
   - .cube LUT içe aktarma
-- **Luminar'dan esinlenen akıllı araçlar:** Otomatik geliştir (fotoğrafı analiz eder), yapı, gökyüzü, altın saat, ışıltı ve cilt yumuşatma.
-- **Kırpma:** En-boy oranları (sinema 2.39:1 dahil), 90° döndürme, aynalama ve boş köşe bırakmayan düzleştirme.
-- **Maskeler:** Doğrusal ve dairesel bölgesel düzenleme (en fazla 4). Her maskede 12 ayar var.
-- **Diğer:** Geri al / yinele, basılı tutunca orijinali gösterme, histogram, ayarları kopyala/yapıştır.
+- **Luminar'dan esinlenen akıllı araçlar:** Otomatik geliştir (fotoğrafı analiz eder), yapı, gökyüzü, altın saat, ışıltı ve cilt yumuşatma. Fotoğrafta kişi varsa cilt yumuşatma yalnızca kişiye uygulanır.
+- **Portre bulanıklığı:** Kişi cihaz üzerinde bulunur (ML Kit, internet gerekmez). Kişi net kalır, arka plan ayarlanabilir şiddette bulanıklaşır. Arka plan bulanıklığı yalnızca arka plan piksellerinden üretildiği için kişinin etrafında hale oluşmaz. Işık topları ve kenar yumuşaklığı ayarlanabilir.
+- **Kırpma ve perspektif:** En-boy oranları (sinema 2.39:1 dahil), 90° döndürme, aynalama, düzleştirme ve dikey/yatay perspektif düzeltme (eğik binaları doğrultur). Boş köşeler hiç görünmez: kırpma kendiliğinden içeride kalır, ayar sırasında hizalama ızgarası çıkar.
+- **Maskeler:** Kişi, doğrusal ve dairesel bölgesel düzenleme (en fazla 4). Kişi maskesi tek dokunuşla kişiyi seçer, ters çevrilince arka planı düzenler. Her maskede 12 ayar var.
+- **Diğer:** Geri al / yinele, basılı tutunca orijinali gösterme, histogram, ayarları kopyala/yapıştır, ilk kullanımda kısa ipuçları.
 - **Dışa aktarma:** Tam çözünürlükte (5120 px'e kadar) JPEG ya da PNG olarak Resimler › Lens035 klasörüne kaydeder ve EXIF tarih/kamera bilgisini korur.
 - **Projeler:** Her düzenleme otomatik kaydedilir, ana ekrandan kaldığın yerden devam edersin.
 
 ### Video
-- Fotoğraftaki film, efekt ve ayarların aynısı. Önizleme ile dışa aktarma aynı GPU hattını kullanır, yani gördüğün sonucu alırsın.
-- Küçük resimli zaman çizelgesinde kırpma, 0.5x–3x hız, sesi kapatma, en-boy kırpma ve döndürme.
+- Fotoğraftaki görünüm, film, efekt ve ayarların aynısı; kendi ön ayarların da uygulanabilir. Önizleme ile dışa aktarma aynı GPU hattını kullanır, yani gördüğün sonucu alırsın. (Kişi gerektiren portre bulanıklığı ve kişi maskesi yalnızca fotoğrafta var.)
+- Küçük resimli zaman çizelgesinde kırpma, 0.5x–3x hız, sesi kapatma, en-boy kırpma, perspektif düzeltme ve döndürme.
 - 720p / 1080p / orijinal (4K'ya kadar) H.264 dışa aktarma. HDR videolar SDR'a dönüştürülür.
 
 ### Poz kamerası
@@ -58,19 +59,21 @@ core/   Saf Kotlin, Android bağımlılığı yok, JVM'de birim testli
   render/    EditState → shader uniform eşlemesi
   analysis/  Histogram, pus tahmini, otomatik geliştirme
   pose/      Poz şablonları ve eşleştirme / talimat üretimi
+  (geometri) Çeyrek dönüş → aynalama → perspektif (H = K·R·K⁻¹) → düzleştirme → kırpma, tek 3x3 projektif matris
 app/
   assets/shaders/  GLSL ES 3.00: bulanıklık piramidi, renk hattı, efektler
   gl/              LensPipeline (çok geçişli GPU hattı), fotoğraf/video önizleme,
                    ekran dışı dışa aktarma, Media3 GlEffect
-  media/           Görüntü yükleme (EXIF, P3→sRGB), galeriye kaydetme, video dışa aktarma
+  media/           Görüntü yükleme (EXIF, P3→sRGB), galeriye kaydetme, video dışa aktarma,
+                   cihaz üzerinde kişi bölütleme (ML Kit selfie segmentation)
   ui/              Jetpack Compose arayüzü
 ```
 
 Tek bir `LensPipeline` dört yerde aynı şekilde çalışır: canlı fotoğraf önizlemesi, tam çözünürlükte dışa aktarma, video önizlemesi (ExoPlayer → SurfaceTexture) ve video dışa aktarma (Media3 Transformer).
 
 ## Testler
-- `./gradlew :core:test`: renk bilimi, eğriler, 32 filmin LUT doğruluğu, geometri, .cube ayrıştırma, shader eşlemesi, poz eşleştirme
-- `./gradlew :app:connectedDebugAndroidTest`: cihaz/emülatör GPU'sunda tüm film, efekt ve görünümlerin render'ı, görüntü yönü, Media3 ile video dışa aktarma, uygulamanın açılışı
+- `./gradlew :core:test`: renk bilimi, eğriler, 32 filmin LUT doğruluğu, geometri ve perspektif (merkez korunumu, ters dönüşüm, boş köşesiz kırpma, döndürme/aynalamada birebir tutarlılık), .cube ayrıştırma, shader eşlemesi, kişi maskesi kuralları, poz eşleştirme
+- `./gradlew :app:connectedDebugAndroidTest`: cihaz/emülatör GPU'sunda tüm film, efekt ve görünümlerin render'ı, görüntü yönü, portre bulanıklığının kişiyi net bırakması, kişi maskesinin yalnızca kişiyi etkilemesi, Media3 ile video dışa aktarma, uygulamanın açılışı
 - Shader'lar geliştirme sırasında WebGL2 (OpenGL ES 3.0 ile aynı dil) üzerinde gerçek fotoğraflarla görsel olarak doğrulandı
 
 ## Lisanslar
