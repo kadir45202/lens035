@@ -16,6 +16,7 @@ import com.lens035.core.film.FilmCatalog
 import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
 import com.lens035.core.model.Geometry
+import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.LightSettings
 import com.lens035.core.model.LocalAdjust
 import com.lens035.core.model.LocalMask
@@ -182,6 +183,20 @@ class PipelineInstrumentedTest {
         val leftSrc = source.getPixel((source.width * 0.2f).toInt(), y)
         assertTrue("person side should be brighter", Color.green(left) > Color.green(leftSrc) + 10)
         assertTrue("background side should be untouched", pixelDiff(out, source, (source.width * 0.8f).toInt(), y) <= 3)
+    }
+
+    private fun luma(c: Int): Float = Color.red(c) * 0.2126f + Color.green(c) * 0.7152f + Color.blue(c) * 0.0722f
+
+    @Test
+    fun perspectiveCropLeavesNoEmptyCorners() {
+        val g = Geometry(vertical = -60f, horizontal = 20f)
+        val crop = GeometryMath.maxCropForAspect(0f, source.width.toFloat(), source.height.toFloat(), g)
+        val out = render(EditState(geometry = g.copy(crop = crop)))
+        val corners = listOf(1 to 1, out.width - 2 to 1, 1 to out.height - 2, out.width - 2 to out.height - 2)
+        for ((x, y) in corners) assertTrue("corner ($x, $y) is empty", luma(out.getPixel(x, y)) > 8f)
+        // Uncropped, the narrowed bottom leaves empty corners: the projective path really ran.
+        val full = render(EditState(geometry = g))
+        assertTrue(luma(full.getPixel(1, full.height - 2)) < 8f)
     }
 
     @Test
