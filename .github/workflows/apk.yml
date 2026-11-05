@@ -36,7 +36,8 @@ jobs:
 
       - name: Error summary
         if: failure()
-        run: grep -nE "^e: |error:|FAILED|What went wrong|Could not (find|resolve)|AAPT|Execution failed" build.log | head -400 || true
+        run: |
+          grep -nE "^e: |error:|FAILED|What went wrong|Could not (find|resolve)|AAPT|Execution failed" build.log | head -400 || true
 
       - name: Publish release
         env:
