@@ -41,7 +41,13 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
 ## Kurulum
 
 ### Hazır APK
-GitHub Actions her push'ta APK üretir: **Actions › Android CI › son çalıştırma › Artifacts › `lens035-apk`**. Telefona `app-release.apk` dosyasını kur. Bu dosya optimize edilmiş sürümdür ve test için debug anahtarıyla imzalanmıştır.
+1. Telefonda **[Releases › en son sürüm](https://github.com/kadir45202/lens035/releases/latest)** sayfasını aç ve **`lens035.apk`** dosyasını indir.
+2. İndirilen dosyaya dokun. İlk seferde tarayıcıya "bilinmeyen uygulamaları yükleme" izni ver.
+3. Yeni sürümler aynı şekilde eskisinin üzerine kurulur; projelerin kaybolmaz.
+
+`main` dalına giren her değişiklik testlerden geçtikten sonra otomatik olarak yeni bir sürüm olarak yayınlanır. Diğer dallardaki her push'un APK'sı da **Actions › Android CI › çalıştırma › Artifacts › `lens035-apk`** altında bulunur.
+
+APK'lar depodaki sabit, gizli olmayan bir anahtarla (`keystore/`) imzalanır; böylece güncellemeler birbirinin üzerine kurulabilir. Mağazada yayınlamadan önce gizli bir yükleme anahtarına geçilmelidir.
 
 ### Kaynaktan derleme
 1. Android Studio (Ladybug veya üstü), JDK 17

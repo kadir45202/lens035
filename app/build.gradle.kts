@@ -15,11 +15,24 @@ android {
         applicationId = "com.lens035.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // CI builds count up so each published APK installs as an update over the last one.
+        val ciBuild = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+        versionCode = ciBuild ?: 1
+        versionName = if (ciBuild != null) "1.0.$ciBuild" else "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    signingConfigs {
+        // One fixed key for side-loaded builds, so updates from any CI run install over each
+        // other. It is not secret: use a private upload key before publishing to a store.
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/lens035-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 
