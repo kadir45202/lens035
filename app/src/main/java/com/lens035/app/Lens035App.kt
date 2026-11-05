@@ -1,6 +1,7 @@
 package com.lens035.app
 
 import android.app.Application
+import com.lens035.app.data.FavoritesStore
 import com.lens035.app.data.HintStore
 import com.lens035.app.data.PresetStore
 import com.lens035.app.data.ProjectStore
@@ -13,6 +14,7 @@ class Lens035App : Application() {
     val projects: ProjectStore by lazy { ProjectStore(this) }
     val presets: PresetStore by lazy { PresetStore(this) }
     val hints: HintStore by lazy { HintStore(this) }
+    val favorites: FavoritesStore by lazy { FavoritesStore(this) }
 
     override fun onCreate() {
         super.onCreate()

@@ -102,6 +102,7 @@ import com.lens035.app.ui.components.LensSheet
 import com.lens035.app.ui.components.PrimaryPill
 import com.lens035.app.ui.components.ToolTab
 import com.lens035.app.Lens035App
+import com.lens035.app.data.FavoriteKind
 import com.lens035.app.data.HintStore
 import com.lens035.app.data.UserPreset
 import com.lens035.app.ui.components.HintHost
@@ -194,6 +195,9 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
     var showPresetDialog by remember { mutableStateOf(false) }
     val app = context.applicationContext as Lens035App
     val userPresets by app.presets.presets.collectAsState()
+    val favFilms by app.favorites.of(FavoriteKind.FILM).collectAsState()
+    val favEffects by app.favorites.of(FavoriteKind.EFFECT).collectAsState()
+    val favLooks by app.favorites.of(FavoriteKind.LOOK).collectAsState()
 
     val playerReleased = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val player = remember {
@@ -475,9 +479,22 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                         onPresetDetails = { p -> detail = VideoDetail.Preset(p) },
                         onSavePreset = { showPresetDialog = true },
                         onDetails = { Looks.find(selectedLook ?: "")?.let { detail = VideoDetail.LookStrength(it) } },
+                        favorites = favLooks,
+                        onToggleFavorite = { id -> app.favorites.toggle(FavoriteKind.LOOK, id) },
                     )
-                    t == VideoTool.FILM -> FilmsStrip(session) { detail = VideoDetail.Film }
-                    t == VideoTool.EFFECTS -> EffectsStrip(session, null, exclude = VIDEO_EXCLUDED_EFFECTS) { detail = VideoDetail.Effect(it) }
+                    t == VideoTool.FILM -> FilmsStrip(
+                        session,
+                        onDetails = { detail = VideoDetail.Film },
+                        favorites = favFilms,
+                        onToggleFavorite = { id -> app.favorites.toggle(FavoriteKind.FILM, id) },
+                    )
+                    t == VideoTool.EFFECTS -> EffectsStrip(
+                        session,
+                        null,
+                        exclude = VIDEO_EXCLUDED_EFFECTS,
+                        favorites = favEffects,
+                        onToggleFavorite = { id -> app.favorites.toggle(FavoriteKind.EFFECT, id) },
+                    ) { detail = VideoDetail.Effect(it) }
                     t == VideoTool.ADJUST -> AdjustTool(
                         session = session,
                         panel = adjustPanel,

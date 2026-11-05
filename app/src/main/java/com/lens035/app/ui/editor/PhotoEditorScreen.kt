@@ -78,6 +78,7 @@ import com.lens035.app.gl.LutCache
 import com.lens035.app.gl.PreviewMode
 import com.lens035.app.media.ImageFormat
 import com.lens035.app.media.MediaSaver
+import com.lens035.app.data.FavoriteKind
 import com.lens035.app.data.HintStore
 import com.lens035.app.ui.components.HintHost
 import com.lens035.app.ui.components.LensIconButton
@@ -159,6 +160,9 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     var histogram by remember { mutableStateOf<IntArray?>(null) }
     val customLuts = remember { mutableStateListOf<String>() }
     val userPresets by app.presets.presets.collectAsState()
+    val favFilms by app.favorites.of(FavoriteKind.FILM).collectAsState()
+    val favEffects by app.favorites.of(FavoriteKind.EFFECT).collectAsState()
+    val favLooks by app.favorites.of(FavoriteKind.LOOK).collectAsState()
 
     LaunchedEffect(Unit) {
         val names = withContext(Dispatchers.IO) {
@@ -173,7 +177,11 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
         histogram = session.histogram(session.state)
     }
     // First-run tips; each disappears for good once read or once the person does what it says.
-    val hints = rememberHintQueue(HintStore.PHOTO_STRIP, HintStore.PHOTO_COMPARE)
+    val hints = rememberHintQueue(HintStore.PHOTO_STRIP, HintStore.PHOTO_COMPARE, HintStore.FAVORITES)
+    fun toggleFavorite(kind: FavoriteKind, id: String) {
+        app.favorites.toggle(kind, id)
+        hints.done(HintStore.FAVORITES)
+    }
     LaunchedEffect(session.canUndo) { if (session.canUndo) hints.done(HintStore.PHOTO_STRIP) }
     LaunchedEffect(comparing, split) { if (comparing || split != null) hints.done(HintStore.PHOTO_COMPARE) }
     // Portrait blur, skin smoothing and person masks need to know where the person is.
@@ -375,10 +383,11 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                 texts = mapOf(
                     HintStore.PHOTO_STRIP to "Bir filme ya da efekte dokun, hemen uygulanır. Seçiliyken yeniden dokun ya da köşedeki oka bas: ince ayarlar açılır.",
                     HintStore.PHOTO_COMPARE to "Orijinali görmek için fotoğrafa basılı tut. Üstteki karşılaştır düğmesine dokunursan önce/sonra yan yana görünür.",
+                    HintStore.FAVORITES to "Sık kullandığın bir film, efekt ya da görünüme uzun bas: yıldızlanır ve Favoriler'de toplanır.",
                 ),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                 visible = !session.loading && session.error == null && detail == null && !comparing && when (hints.current) {
-                    HintStore.PHOTO_STRIP -> tool == EditorTool.FILM || tool == EditorTool.LOOKS || tool == EditorTool.EFFECTS
+                    HintStore.PHOTO_STRIP, HintStore.FAVORITES -> tool == EditorTool.FILM || tool == EditorTool.LOOKS || tool == EditorTool.EFFECTS
                     else -> tool != EditorTool.CROP && tool != EditorTool.MASKS
                 },
             )
@@ -422,9 +431,21 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                             onPresetDetails = { p -> detail = Detail.Preset(p) },
                             onSavePreset = { showPresetDialog = true },
                             onDetails = { Looks.find(selectedLook ?: "")?.let { detail = Detail.LookStrength(it) } },
+                            favorites = favLooks,
+                            onToggleFavorite = { id -> toggleFavorite(FavoriteKind.LOOK, id) },
                         )
-                        t == EditorTool.FILM -> FilmsStrip(session) { detail = Detail.Film }
-                        t == EditorTool.EFFECTS -> EffectsStrip(session, null) { type -> detail = Detail.Effect(type) }
+                        t == EditorTool.FILM -> FilmsStrip(
+                            session,
+                            onDetails = { detail = Detail.Film },
+                            favorites = favFilms,
+                            onToggleFavorite = { id -> toggleFavorite(FavoriteKind.FILM, id) },
+                        )
+                        t == EditorTool.EFFECTS -> EffectsStrip(
+                            session,
+                            null,
+                            favorites = favEffects,
+                            onToggleFavorite = { id -> toggleFavorite(FavoriteKind.EFFECT, id) },
+                        ) { type -> detail = Detail.Effect(type) }
                         t == EditorTool.ADJUST -> AdjustTool(
                             session = session,
                             panel = adjustPanel,
