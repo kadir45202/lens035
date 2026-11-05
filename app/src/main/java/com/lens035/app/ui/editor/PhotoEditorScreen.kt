@@ -6,6 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Gradient
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -97,6 +99,7 @@ import com.lens035.core.model.MaskKind
 import com.lens035.core.presets.Look
 import com.lens035.core.presets.Looks
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -214,6 +217,41 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) doExport() else Toast.makeText(context, "Galeriye kaydetmek için depolama izni gerekli.", Toast.LENGTH_LONG).show()
     }
+
+    // ------------------------------------------------------------------ batch: this edit on other photos
+    var batchUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var batchUi by remember { mutableStateOf<BatchUi?>(null) }
+    var batchJob by remember { mutableStateOf<Job?>(null) }
+    fun startBatch() {
+        val uris = batchUris
+        val look = session.state.lookOnly()
+        val options = exportOptions.copy(quality = quality.value)
+        val total = uris.size
+        batchUi = BatchUi.Running(0, 0, total)
+        batchJob = scope.launch {
+            var saved = 0
+            var failed = 0
+            try {
+                BatchExporter(context).run(uris, look, options) { s, f ->
+                    saved = s
+                    failed = f
+                    batchUi = BatchUi.Running(s, f, total)
+                }
+            } finally {
+                batchUi = BatchUi.Finished(saved, failed, stopped = saved + failed < total)
+                batchJob = null
+            }
+        }
+    }
+    val batchPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startBatch() else Toast.makeText(context, "Galeriye kaydetmek için depolama izni gerekli.", Toast.LENGTH_LONG).show()
+    }
+    val batchPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(BatchExporter.MAX_PHOTOS)) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            batchUris = uris
+            batchUi = BatchUi.Ready(uris.size)
+        }
+    }
     val lutPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -278,6 +316,10 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                         showPresetDialog = true
                         menuOpen = false
                     })
+                    DropdownMenuItem(text = { Text("Başka fotoğraflara uygula") }, onClick = {
+                        menuOpen = false
+                        batchPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }, leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, null) })
                     DropdownMenuItem(text = { Text("Tümünü sıfırla") }, onClick = {
                         session.resetAll()
                         selectedLook = null
@@ -499,6 +541,18 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     )
 
     HistorySheet(visible = showHistory, session = session, onDismiss = { showHistory = false })
+
+    BatchExportSheet(
+        ui = batchUi,
+        summary = "${exportOptions.format.label} · ${quality.label} · ${exportOptions.size.label}",
+        onStart = {
+            val needsPermission = MediaSaver.needsLegacyPermission() &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+            if (needsPermission) batchPermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE) else startBatch()
+        },
+        onStop = { batchJob?.cancel() },
+        onDismiss = { if (batchJob == null) batchUi = null },
+    )
 
     if (showPresetDialog) {
         SavePresetDialog(onDismiss = { showPresetDialog = false }) { name ->
