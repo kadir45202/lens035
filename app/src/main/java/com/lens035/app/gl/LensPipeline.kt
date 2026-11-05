@@ -326,15 +326,30 @@ class LensPipeline(private val sources: ShaderSources) {
      * Draws a finished top-down texture into the current default framebuffer, letterboxed
      * and transformed by [view] (scale x/y, offset x/y in view UV with v = 0 at the top).
      */
-    fun present(texture: Int, viewWidth: Int, viewHeight: Int, view: FloatArray, background: FloatArray) {
+    fun present(
+        texture: Int,
+        viewWidth: Int,
+        viewHeight: Int,
+        view: FloatArray,
+        background: FloatArray,
+        /** Draw only the view columns [clipLeft, clipRight) (split compare); the rest is kept. */
+        clipLeft: Int = 0,
+        clipRight: Int = viewWidth,
+    ) {
         resetState()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, viewWidth, viewHeight)
+        val clipped = clipLeft > 0 || clipRight < viewWidth
+        if (clipped) {
+            GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
+            GLES30.glScissor(clipLeft, 0, max(0, clipRight - clipLeft), viewHeight)
+        }
         presentProgram.use()
         presentProgram.bindTexture("u_tex", 0, GLES30.GL_TEXTURE_2D, texture)
         presentProgram.set4f("u_view", view[0], view[1], view[2], view[3])
         presentProgram.set3f("u_bg", background[0], background[1], background[2])
         drawQuad(presentProgram, true)
+        if (clipped) GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
     }
 

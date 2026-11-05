@@ -57,6 +57,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -134,6 +141,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     var detail by remember { mutableStateOf<Detail?>(null) }
     var adjustPanel by remember { mutableStateOf(AdjustPanel.LIGHT) }
     var comparing by remember { mutableStateOf(false) }
+    var split by remember { mutableStateOf<Float?>(null) }
     var selectedMask by remember { mutableStateOf<Long?>(null) }
     var cropGuides by remember { mutableStateOf(false) }
     var selectedLook by remember { mutableStateOf<String?>(null) }
@@ -165,7 +173,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     // First-run tips; each disappears for good once read or once the person does what it says.
     val hints = rememberHintQueue(HintStore.PHOTO_STRIP, HintStore.PHOTO_COMPARE)
     LaunchedEffect(session.canUndo) { if (session.canUndo) hints.done(HintStore.PHOTO_STRIP) }
-    LaunchedEffect(comparing) { if (comparing) hints.done(HintStore.PHOTO_COMPARE) }
+    LaunchedEffect(comparing, split) { if (comparing || split != null) hints.done(HintStore.PHOTO_COMPARE) }
     // Portrait blur, skin smoothing and person masks need to know where the person is.
     val needsPerson = session.state.needsPersonMask
     LaunchedEffect(needsPerson, session.preview) {
@@ -231,7 +239,11 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
             LensIconButton(Icons.AutoMirrored.Rounded.Undo, "Geri al", { session.undo() }, enabled = session.canUndo)
             LensIconButton(Icons.AutoMirrored.Rounded.Redo, "Yinele", { session.redo() }, enabled = session.canRedo)
             Spacer(Modifier.weight(1f))
-            CompareButton(onCompare = { comparing = it })
+            CompareButton(
+                splitOn = split != null,
+                onToggleSplit = { split = if (split == null) 0.5f else null },
+                onCompare = { comparing = it },
+            )
             Box {
                 LensIconButton(Icons.Rounded.MoreHoriz, "Diğer", { menuOpen = true })
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -274,6 +286,8 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                 mode = mode,
                 gesturesEnabled = tool != EditorTool.CROP && tool != EditorTool.MASKS,
                 onCompare = { comparing = it },
+                split = split.takeIf { tool != EditorTool.CROP && tool != EditorTool.MASKS && !comparing },
+                onSplit = { split = it },
             ) { vt ->
                 when (tool) {
                     EditorTool.CROP -> {
@@ -354,7 +368,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                 queue = hints,
                 texts = mapOf(
                     HintStore.PHOTO_STRIP to "Bir filme ya da efekte dokun, hemen uygulanır. Seçiliyken yeniden dokun ya da köşedeki oka bas: ince ayarlar açılır.",
-                    HintStore.PHOTO_COMPARE to "Orijinali görmek için fotoğrafa basılı tut. İki parmakla ya da çift dokunarak yakınlaştırabilirsin.",
+                    HintStore.PHOTO_COMPARE to "Orijinali görmek için fotoğrafa basılı tut. Üstteki karşılaştır düğmesine dokunursan önce/sonra yan yana görünür.",
                 ),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                 visible = !session.loading && session.error == null && detail == null && !comparing && when (hints.current) {
@@ -466,29 +480,40 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     }
 }
 
-/** Press-and-hold button that shows the original while held. */
+/** Tap: split before/after view on and off. Press and hold: the whole original while held. */
 @Composable
-private fun CompareButton(onCompare: (Boolean) -> Unit) {
+private fun CompareButton(splitOn: Boolean, onToggleSplit: () -> Unit, onCompare: (Boolean) -> Unit) {
+    val toggle by rememberUpdatedState(onToggleSplit)
+    val compare by rememberUpdatedState(onCompare)
     Box(
         Modifier
             .size(44.dp)
-            .pointerInputCompare(onCompare),
+            .clip(CircleShape)
+            .background(if (splitOn) LensColors.Active else Color.Transparent)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { toggle() },
+                    onLongPress = { compare(true) },
+                    onPress = {
+                        tryAwaitRelease()
+                        compare(false)
+                    },
+                )
+            }
+            .semantics {
+                role = Role.Button
+                stateDescription = if (splitOn) "Bölünmüş görünüm açık" else "Bölünmüş görünüm kapalı"
+            },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Rounded.Compare, "Orijinali göster (basılı tut)", tint = LensColors.Text, modifier = Modifier.size(22.dp))
+        Icon(
+            Icons.Rounded.Compare,
+            "Önce / sonra: dokun bölünmüş görünüm, basılı tut orijinal",
+            tint = if (splitOn) LensColors.Accent else LensColors.Text,
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
-
-private fun Modifier.pointerInputCompare(onCompare: (Boolean) -> Unit): Modifier =
-    this.then(
-        Modifier.pointerInput(Unit) {
-            detectTapGestures(onPress = {
-                onCompare(true)
-                tryAwaitRelease()
-                onCompare(false)
-            })
-        },
-    )
 
 /** Small luminance + RGB histogram drawn over the canvas. */
 @Composable

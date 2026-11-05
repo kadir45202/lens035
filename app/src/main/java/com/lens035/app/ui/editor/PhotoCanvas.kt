@@ -49,6 +49,7 @@ fun previewOutputSize(session: PhotoSession, mode: PreviewMode): IntSize {
 
 /**
  * The live GPU preview with pinch-zoom, double-tap zoom and press-and-hold to compare.
+ * [split] (0..1 of the width, or null) shows the original left of a draggable divider.
  * [overlay] draws on top in view coordinates (crop handles, masks).
  */
 @Composable
@@ -58,6 +59,8 @@ fun PhotoCanvas(
     gesturesEnabled: Boolean,
     onCompare: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    split: Float? = null,
+    onSplit: (Float) -> Unit = {},
     overlay: @Composable BoxScope.(ViewTransform) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -113,6 +116,8 @@ fun PhotoCanvas(
     }
 
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    val splitPx = split?.let { it * viewSize.width }
+    SideEffect { renderer.setSplit(splitPx) }
     var zoom by remember { mutableFloatStateOf(1f) }
     var panX by remember { mutableFloatStateOf(0f) }
     var panY by remember { mutableFloatStateOf(0f) }
@@ -185,6 +190,9 @@ fun PhotoCanvas(
             },
     ) {
         AndroidView(factory = { glView }, modifier = Modifier.fillMaxSize())
-        if (viewSize.width > 0 && preview != null) overlay(vt)
+        if (viewSize.width > 0 && preview != null) {
+            overlay(vt)
+            if (split != null && mode == PreviewMode.NORMAL) SplitDivider(split, vt, onSplit)
+        }
     }
 }

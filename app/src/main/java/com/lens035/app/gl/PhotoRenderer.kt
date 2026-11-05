@@ -9,11 +9,13 @@ import com.lens035.app.media.DateStamp
 import com.lens035.core.analysis.ImageStats
 import com.lens035.core.model.CropRect
 import com.lens035.core.model.EditState
+import com.lens035.core.model.Geometry
 import com.lens035.core.model.GeometryMath
 import com.lens035.core.render.RenderContext
 import com.lens035.core.render.ShaderParams
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.roundToInt
 
 /**
  * Live preview renderer for photos (GLSurfaceView, render-when-dirty). The UI thread pushes
@@ -37,6 +39,9 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
     @Volatile
     private var snapshot = Snapshot(null, 0, 0, 0, EditState(), ImageStats.NEUTRAL, "", PreviewMode.NORMAL)
 
+    /** Split compare divider in view pixels (left of it shows the original), or negative when off. */
+    @Volatile private var splitPx = -1f
+
     @Volatile private var zoom = 1f
     @Volatile private var panX = 0f
     @Volatile private var panY = 0f
@@ -53,6 +58,9 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
     private var renderedVersion = -1L
     private var renderedMode: PreviewMode? = null
     private var renderedMaskKey: String? = null
+    private var originalTarget: RenderTarget? = null
+    private var originalGeometry: Geometry? = null
+    private var originalVersion = -1L
     private var viewWidth = 0
     private var viewHeight = 0
 
@@ -91,6 +99,14 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
         view.requestRender()
     }
 
+    /** Turns split compare on at view x [px], or off with null. */
+    fun setSplit(px: Float?) {
+        val v = px ?: -1f
+        if (v == splitPx) return
+        splitPx = v
+        view.requestRender()
+    }
+
     fun setView(zoom: Float, panX: Float, panY: Float) {
         this.zoom = zoom
         this.panX = panX
@@ -105,6 +121,8 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
         uploadedVersion = -1
         finalTarget = null
         renderedState = null
+        originalTarget = null
+        originalGeometry = null
         try {
             pipeline = LensPipeline(ShaderSources.get(context)).also { it.init() }
         } catch (t: Throwable) {
@@ -166,7 +184,17 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
                 renderedMaskKey = mask?.key
             }
             val vt = ViewTransform.fit(viewWidth, viewHeight, target.width, target.height, marginPx, zoom, panX, panY)
-            p.present(target.texture, viewWidth, viewHeight, vt.toUniform(viewWidth, viewHeight), background)
+            val uniform = vt.toUniform(viewWidth, viewHeight)
+            val split = splitPx
+            if (split >= 0f && snap.mode == PreviewMode.NORMAL) {
+                val original = originalFor(p, bmp, snap, state)
+                val x = split.roundToInt().coerceIn(0, viewWidth)
+                p.present(original.texture, viewWidth, viewHeight, uniform, background, clipLeft = 0, clipRight = x)
+                p.present(target.texture, viewWidth, viewHeight, uniform, background, clipLeft = x, clipRight = viewWidth)
+            } else {
+                if (split < 0f) releaseOriginal()
+                p.present(target.texture, viewWidth, viewHeight, uniform, background)
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "Render failed", t)
             renderedState = null
@@ -174,9 +202,40 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
         }
     }
 
+    /** The unedited photo with the same geometry, so both halves of a split line up exactly. */
+    private fun originalFor(p: LensPipeline, bmp: Bitmap, snap: Snapshot, state: EditState): RenderTarget {
+        val g = state.geometry
+        var t = originalTarget
+        if (t != null && originalGeometry == g && originalVersion == uploadedVersion) return t
+        val orig = effectiveState(state, PreviewMode.ORIGINAL)
+        val out = GeometryMath.outputSize(bmp.width, bmp.height, g)
+        if (t == null || !t.matches(out.width, out.height, false)) {
+            t?.release()
+            t = RenderTarget(out.width, out.height, false, mipmapped = true)
+            originalTarget = t
+        }
+        val ctx = RenderContext(bmp.width, bmp.height, snap.fullWidth.coerceAtLeast(1), snap.fullHeight.coerceAtLeast(1), out.width, out.height)
+        p.render(
+            PipelineInput(sourceTex, InputKind.TEXTURE_TOP_DOWN, bmp.width, bmp.height, uploadedVersion),
+            ShaderParams.build(orig, ctx, snap.stats, snap.dateText),
+            FrameResources(filmLut = null, customLut = null),
+            PipelineOutput.Target(t),
+        )
+        originalGeometry = g
+        originalVersion = uploadedVersion
+        return t
+    }
+
+    private fun releaseOriginal() {
+        originalTarget?.release()
+        originalTarget = null
+        originalGeometry = null
+    }
+
     /** Must be called on the GL thread (queueEvent) before the view goes away. */
     fun releaseGl() {
         try {
+            releaseOriginal()
             finalTarget?.release()
             GlUtil.deleteTexture(sourceTex)
             pipeline?.release()

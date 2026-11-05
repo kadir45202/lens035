@@ -4,6 +4,15 @@ import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import com.lens035.app.ui.theme.LensShapes
+import com.lens035.app.ui.theme.LensType
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxSize
@@ -249,6 +258,70 @@ class SourceViewMapper(
 }
 
 private enum class MaskHandle { NONE, CENTER, A, B, RX, RY }
+
+/**
+ * Divider of the split compare at [fraction] of the view width: the original is on its left, the
+ * edit on its right. Drags that start near the line move it; other touches fall through to the
+ * canvas (zoom, pan, hold to compare).
+ */
+@Composable
+fun SplitDivider(fraction: Float, vt: ViewTransform, onChange: (Float) -> Unit) {
+    val density = LocalDensity.current
+    val touch = with(density) { 36.dp.toPx() }
+    val current by rememberUpdatedState(fraction)
+    val change by rememberUpdatedState(onChange)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewW = constraints.maxWidth.toFloat()
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        if (abs(down.position.x - current * size.width) > touch) return@awaitEachGesture
+                        down.consume()
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pc = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!pc.pressed) break
+                            pc.consume()
+                            change((pc.position.x / size.width).coerceIn(0.02f, 0.98f))
+                        }
+                    }
+                },
+        ) {
+            val x = current * size.width
+            val top = vt.top.coerceIn(0f, size.height)
+            val bottom = vt.bottom.coerceIn(0f, size.height)
+            drawLine(Color.White, Offset(x, top), Offset(x, bottom), 2.dp.toPx())
+            val cy = (top + bottom) / 2f
+            drawCircle(Color.White, 17.dp.toPx(), Offset(x, cy))
+            val a = 5.dp.toPx()
+            val gap = 3.5.dp.toPx()
+            val chevrons = Path().apply {
+                moveTo(x - gap, cy - a); lineTo(x - gap - a, cy); lineTo(x - gap, cy + a)
+                moveTo(x + gap, cy - a); lineTo(x + gap + a, cy); lineTo(x + gap, cy + a)
+            }
+            drawPath(chevrons, Color.Black, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+        // Labels sit in the image's top corners, not the view's (portrait photos leave side bars).
+        val labelTop = with(density) { vt.top.coerceAtLeast(0f).toDp() } + 10.dp
+        val labelStart = with(density) { vt.left.coerceIn(0f, viewW).toDp() } + 10.dp
+        val labelEnd = with(density) { (viewW - vt.right).coerceIn(0f, viewW).toDp() } + 10.dp
+        SplitLabel("Önce", Modifier.align(Alignment.TopStart).padding(start = labelStart, top = labelTop))
+        SplitLabel("Sonra", Modifier.align(Alignment.TopEnd).padding(end = labelEnd, top = labelTop))
+    }
+}
+
+@Composable
+private fun SplitLabel(text: String, modifier: Modifier) {
+    Text(
+        text,
+        style = LensType.Label,
+        color = LensColors.Text,
+        modifier = modifier.background(Color.Black.copy(alpha = 0.55f), LensShapes.Pill).padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
 
 /**
  * Briefly tints what a person mask selects (the detected person, or everything else when
