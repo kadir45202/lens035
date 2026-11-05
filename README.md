@@ -40,19 +40,23 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
 
 ## Kurulum
 
-### Hazır APK
-1. Telefonda **[Releases › en son sürüm](https://github.com/kadir45202/lens035/releases/latest)** sayfasını aç ve **`lens035.apk`** dosyasını indir.
-2. İndirilen dosyaya dokun. İlk seferde tarayıcıya "bilinmeyen uygulamaları yükleme" izni ver.
-3. Yeni sürümler aynı şekilde eskisinin üzerine kurulur; projelerin kaybolmaz.
+Depoda yalnızca kaynak kod var; APK'yı kendin derlersin.
 
-`main` dalına giren her değişiklik testlerden geçtikten sonra otomatik olarak yeni bir sürüm olarak yayınlanır. Diğer dallardaki her push'un APK'sı da **Actions › Android CI › çalıştırma › Artifacts › `lens035-apk`** altında bulunur.
+### Android Studio ile
+1. Android Studio (Ladybug veya üstü) ve JDK 17 kur.
+2. Projeyi aç, Gradle senkronizasyonunu bekle.
+3. Telefonu USB ile bağla (Geliştirici seçenekleri › USB hata ayıklama açık) ve **Run ▶**'a bas. Uygulama telefona kurulup açılır.
 
-APK'lar depodaki sabit, gizli olmayan bir anahtarla (`keystore/`) imzalanır; böylece güncellemeler birbirinin üzerine kurulabilir. Mağazada yayınlamadan önce gizli bir yükleme anahtarına geçilmelidir.
+### Komut satırından
+```bash
+./gradlew :app:assembleRelease
+```
+APK `app/build/outputs/apk/release/app-release.apk` konumunda oluşur. Telefona kurmak için:
+```bash
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
 
-### Kaynaktan derleme
-1. Android Studio (Ladybug veya üstü), JDK 17
-2. Projeyi aç ve Gradle senkronizasyonunu bekle
-3. `./gradlew :app:assembleRelease` (ya da Run ▶)
+APK'lar depodaki sabit, gizli olmayan bir anahtarla (`keystore/`) imzalanır. Böylece hangi bilgisayarda derlenirse derlensin yeni sürüm eskisinin üzerine kurulur ve projeler kaybolmaz. Mağazada yayınlamadan önce gizli bir yükleme anahtarına geçilmelidir.
 
 Gereksinimler: Android 8.0 (API 26) veya üstü ve OpenGL ES 3.0 destekli bir cihaz. Günümüzdeki telefonların hemen hepsi uygun.
 
