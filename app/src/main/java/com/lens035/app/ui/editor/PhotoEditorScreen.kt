@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Gradient
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
@@ -154,6 +155,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     var quality by remember { mutableStateOf(Quality.HIGH) }
     var showPresetDialog by remember { mutableStateOf(false) }
     var showHistogram by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
     var histogram by remember { mutableStateOf<IntArray?>(null) }
     val customLuts = remember { mutableStateListOf<String>() }
     val userPresets by app.presets.presets.collectAsState()
@@ -247,6 +249,10 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
             Box {
                 LensIconButton(Icons.Rounded.MoreHoriz, "Diğer", { menuOpen = true })
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Geçmiş") }, onClick = {
+                        showHistory = true
+                        menuOpen = false
+                    }, leadingIcon = { Icon(Icons.Rounded.History, null) })
                     DropdownMenuItem(text = { Text("Histogram " + if (showHistogram) "gizle" else "göster") }, onClick = {
                         showHistogram = !showHistogram
                         menuOpen = false
@@ -470,6 +476,8 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
             saveState = SaveState.Idle
         },
     )
+
+    HistorySheet(visible = showHistory, session = session, onDismiss = { showHistory = false })
 
     if (showPresetDialog) {
         SavePresetDialog(onDismiss = { showPresetDialog = false }) { name ->

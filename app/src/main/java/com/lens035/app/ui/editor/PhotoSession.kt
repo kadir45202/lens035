@@ -146,7 +146,7 @@ class PhotoSession(
                 }
                 preview = decoded.bitmap
                 if (existing == null && initialFilmId != null) {
-                    FilmCatalog.find(initialFilmId)?.let { state = state.copy(film = FilmDefaults.settingsFor(it)) }
+                    FilmCatalog.find(initialFilmId)?.let { startWith(state.copy(film = FilmDefaults.settingsFor(it))) }
                 }
                 takePersistablePermission()
                 loading = false

@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Flare
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
@@ -113,6 +114,7 @@ import com.lens035.app.ui.editor.EffectDetails
 import com.lens035.app.ui.editor.EffectsStrip
 import com.lens035.app.ui.editor.FilmDetails
 import com.lens035.app.ui.editor.FilmsStrip
+import com.lens035.app.ui.editor.HistorySheet
 import com.lens035.app.ui.editor.LookDetails
 import com.lens035.app.ui.editor.LooksStrip
 import com.lens035.app.ui.editor.PresetDetails
@@ -185,6 +187,7 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
     var exportUi by remember { mutableStateOf<ExportUi>(ExportUi.Idle) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     var cropGuides by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
     var selectedLook by remember { mutableStateOf<String?>(null) }
     var lookBase by remember { mutableStateOf<EditState?>(null) }
     var lookStrength by remember { mutableStateOf(100f) }
@@ -361,6 +364,7 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
             LensIconButton(Icons.AutoMirrored.Rounded.Undo, "Geri al", { session.undo() }, enabled = session.canUndo)
             LensIconButton(Icons.AutoMirrored.Rounded.Redo, "Yinele", { session.redo() }, enabled = session.canRedo)
             Spacer(Modifier.weight(1f))
+            LensIconButton(Icons.Rounded.History, "Geçmiş", { showHistory = true }, enabled = session.history.size > 1)
             Box(
                 Modifier.size(44.dp).pointerInput(Unit) {
                     detectTapGestures(onPress = {
@@ -497,6 +501,8 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
             }
         }
     }
+
+    HistorySheet(visible = showHistory, session = session, onDismiss = { showHistory = false })
 
     if (showPresetDialog) {
         SavePresetDialog(onDismiss = { showPresetDialog = false }) { name ->
