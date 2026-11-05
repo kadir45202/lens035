@@ -45,7 +45,13 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
 
 ## Kurulum
 
-Depoda yalnızca kaynak kod var; APK'yı kendin derlersin.
+### Hazır APK (en kolayı)
+Her güncellemede GitHub uygulamayı kendisi derler (birkaç dakika) ve APK'yı **Releases** sayfasına koyar:
+1. Telefondan https://github.com/kadir45202/lens035/releases/latest adresini aç.
+2. **Assets** altındaki **lens035.apk** dosyasına dokunup indir.
+3. İndirilen dosyayı aç; ilk seferde tarayıcıya "bilinmeyen uygulamaları yükleme" izni ver.
+
+Depoda yalnızca kaynak kod tutulur; APK yalnızca Releases sayfasında durur. İstersen aşağıdaki gibi kendin de derleyebilirsin.
 
 ### Android Studio ile
 1. Android Studio (Ladybug veya üstü) ve JDK 17 kur.
