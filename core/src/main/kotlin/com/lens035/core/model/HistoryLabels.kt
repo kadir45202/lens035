@@ -27,6 +27,7 @@ object HistoryLabels {
             geometry(before.geometry, after.geometry),
             masks(before.masks, after.masks),
             lut(before, after),
+            heals(before.heals, after.heals),
         )
         // Undoing a single change back to the original is still that change, not a reset.
         if (after.isDefault && parts.size > 1) return "Tümü sıfırlandı"
@@ -193,6 +194,14 @@ object HistoryLabels {
             }
             else -> "Maskeler"
         }
+    }
+
+    private fun heals(a: List<HealSpot>, b: List<HealSpot>): String? = when {
+        a == b -> null
+        b.isEmpty() && a.size > 1 -> "Lekeler temizlendi"
+        b.size > a.size -> "Leke giderildi"
+        b.size < a.size -> "Leke silindi"
+        else -> "Leke düzenlendi"
     }
 
     private fun lut(a: EditState, b: EditState): String? = when {

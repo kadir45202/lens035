@@ -56,6 +56,10 @@ class RenderParams(
     val needsPersonMask: Boolean = false,
     /** Whether the portrait blur needs its background-only blur pyramid. */
     val needsBokehPyramid: Boolean = false,
+    /** Uniforms of the healing pass, or null when nothing is healed. */
+    val heal: UniformSet? = null,
+    /** Changes whenever the healing changes (cache key for the healed source). */
+    val healKey: String = "",
 )
 
 data class DateStampSpec(val text: String, val style: Int)
@@ -84,6 +88,9 @@ object FilmDefaults {
 object ShaderParams {
     const val MAX_MASKS = 4
 
+    /** Healed spots per photo the GPU pass handles. */
+    const val MAX_HEALS = 24
+
     fun build(
         state: EditState,
         ctx: RenderContext,
@@ -108,7 +115,26 @@ object ShaderParams {
             dateStamp = dateFx?.let { DateStampSpec(dateText, it.value(EffectType.DATE_STAMP.param("style")!!).toInt()) },
             needsPersonMask = state.needsPersonMask,
             needsBokehPyramid = state.hasEffect(EffectType.BOKEH),
+            heal = buildHeal(state),
+            healKey = if (state.heals.isEmpty()) "" else state.heals.take(MAX_HEALS).hashCode().toString(),
         )
+    }
+
+    /** Healing pass: destination circle + feather, then source centre, per spot. */
+    private fun buildHeal(s: EditState): UniformSet? {
+        val spots = s.heals.take(MAX_HEALS)
+        if (spots.isEmpty()) return null
+        val a = FloatArray(MAX_HEALS * 4)
+        val b = FloatArray(MAX_HEALS * 4)
+        spots.forEachIndexed { i, h ->
+            a[i * 4] = h.x; a[i * 4 + 1] = h.y; a[i * 4 + 2] = h.radius.coerceIn(0.001f, 0.5f); a[i * 4 + 3] = h.feather.coerceIn(0f, 1f)
+            b[i * 4] = h.sx; b[i * 4 + 1] = h.sy
+        }
+        return UniformSet().apply {
+            i("u_healCount", spots.size)
+            v4a("u_healA", a)
+            v4a("u_healB", b)
+        }
     }
 
     private fun buildMain(

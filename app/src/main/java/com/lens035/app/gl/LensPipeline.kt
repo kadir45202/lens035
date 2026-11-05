@@ -101,6 +101,9 @@ class LensPipeline(private val sources: ShaderSources) {
     private lateinit var effectsProgram: ShaderProgram
     private lateinit var presentProgram: ShaderProgram
     private lateinit var downMaskedProgram: ShaderProgram
+    private lateinit var healProgram: ShaderProgram
+    private var healed: RenderTarget? = null
+    private var healedKey: String? = null
 
     private var vao = 0
     private var vbo = 0
@@ -149,6 +152,7 @@ class LensPipeline(private val sources: ShaderSources) {
         effectsProgram = ShaderProgram(vert, sources["effects.frag"], "effects")
         presentProgram = ShaderProgram(vert, sources["present.frag"], "present")
         downMaskedProgram = ShaderProgram(vert, sources["down_masked.frag"], "down_masked")
+        healProgram = ShaderProgram(vert, sources["heal.frag"], "heal")
 
         val ids = IntArray(1)
         GLES30.glGenVertexArrays(1, ids, 0)
@@ -176,7 +180,10 @@ class LensPipeline(private val sources: ShaderSources) {
 
     fun release() {
         if (!initialized) return
-        listOf(importProgram, importOesProgram, downProgram, blurProgram, mainProgram, effectsProgram, presentProgram, downMaskedProgram).forEach { it.release() }
+        listOf(importProgram, importOesProgram, downProgram, blurProgram, mainProgram, effectsProgram, presentProgram, downMaskedProgram, healProgram).forEach { it.release() }
+        healed?.release()
+        healed = null
+        healedKey = null
         GLES30.glDeleteVertexArrays(1, intArrayOf(vao), 0)
         GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0)
         listOf(dummyLut, dummyCurves, dummyOverlay, dummyMask, lutTex, lut2Tex, curvesTex, overlayTex, personTex).forEach { GlUtil.deleteTexture(it) }
@@ -198,6 +205,28 @@ class LensPipeline(private val sources: ShaderSources) {
             pyrPTmp[i]?.release(); pyrPTmp[i] = null
         }
         pyrAKey = null
+    }
+
+    /** [srcTex] with the healing applied (cached), or [srcTex] itself when nothing is healed. */
+    private fun healedSource(srcTex: Int, version: Long, w: Int, h: Int, params: RenderParams): Int {
+        val heal = params.heal ?: return srcTex
+        val previous = healed
+        val target = ensure(previous, w, h, false)
+        if (target !== previous) {
+            healed = target
+            healedKey = null
+        }
+        val key = "$version:$w:$h:$srcTex:${params.healKey}"
+        if (key != healedKey) {
+            target.bind()
+            healProgram.use()
+            healProgram.apply(heal)
+            healProgram.bindTexture("u_tex", 0, GLES30.GL_TEXTURE_2D, srcTex)
+            healProgram.set2f("u_texSize", w.toFloat(), h.toFloat())
+            drawQuad(healProgram, false)
+            healedKey = key
+        }
+        return target.texture
     }
 
     private fun ensure(current: RenderTarget?, w: Int, h: Int, hdr: Boolean, mip: Boolean = false): RenderTarget {
@@ -250,10 +279,13 @@ class LensPipeline(private val sources: ShaderSources) {
             }
         }
 
-        // 2. Blur pyramid of the source (cached while the input is unchanged).
-        val key = "${input.version}:$w:$h:$srcTex"
+        // 1b. Healing works on the source itself, so every later pass sees the healed photo.
+        val source = healedSource(srcTex, input.version, w, h, params)
+
+        // 2. Blur pyramid of the source (cached while the input and healing are unchanged).
+        val key = "${input.version}:$w:$h:$srcTex:${params.healKey}"
         if (key != pyrAKey) {
-            buildPyramid(srcTex, w, h, pyrA, pyrATmp, firstLevelLuma = true)
+            buildPyramid(source, w, h, pyrA, pyrATmp, firstLevelLuma = true)
             pyrAKey = key
         }
 
@@ -262,7 +294,7 @@ class LensPipeline(private val sources: ShaderSources) {
         g.bind()
         mainProgram.use()
         mainProgram.apply(params.main)
-        mainProgram.bindTexture("u_src", 0, GLES30.GL_TEXTURE_2D, srcTex)
+        mainProgram.bindTexture("u_src", 0, GLES30.GL_TEXTURE_2D, source)
         mainProgram.bindTexture("u_pyr1", 1, GLES30.GL_TEXTURE_2D, pyrA[0]!!.texture)
         mainProgram.bindTexture("u_pyr2", 2, GLES30.GL_TEXTURE_2D, pyrA[1]!!.texture)
         mainProgram.bindTexture("u_pyr3", 3, GLES30.GL_TEXTURE_2D, pyrA[2]!!.texture)

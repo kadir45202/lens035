@@ -16,6 +16,7 @@ import com.lens035.core.film.FilmCatalog
 import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
 import com.lens035.core.model.Geometry
+import com.lens035.core.model.HealSpot
 import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.LightSettings
 import com.lens035.core.model.LocalAdjust
@@ -213,6 +214,20 @@ class PipelineInstrumentedTest {
         assertTrue(luma(out.getPixel(out.width / 2, 2)) < 8f)
         assertTrue(luma(out.getPixel(out.width / 2, out.height - 3)) < 8f)
         assertTrue(luma(out.getPixel(out.width / 2, out.height / 2)) > 60f)
+    }
+
+    @Test
+    fun healingCoversABlemish() {
+        // A dark dot in the flat red area, healed from a clean patch beside it.
+        val spotted = source.copy(Bitmap.Config.ARGB_8888, true)
+        Canvas(spotted).drawCircle(60f, 40f, 4f, Paint().apply { color = Color.rgb(20, 20, 20); isAntiAlias = true })
+        val short = minOf(source.width, source.height).toFloat()
+        val heal = HealSpot(1, 60f / source.width, 40f / source.height, 7f / short, 110f / source.width, 40f / source.height, 0.4f)
+        val before = gl.render(spotted, EditState(), ImageStats.NEUTRAL, "")
+        val after = gl.render(spotted, EditState(heals = listOf(heal)), ImageStats.NEUTRAL, "")
+        val red = Color.red(source.getPixel(60, 40))
+        assertTrue("the dot is visible before", Color.red(before.getPixel(60, 40)) < red - 80)
+        assertTrue("the dot is healed", abs(Color.red(after.getPixel(60, 40)) - red) <= 12)
     }
 
     @Test

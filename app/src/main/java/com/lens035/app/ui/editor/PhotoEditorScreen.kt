@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Gradient
+import androidx.compose.material.icons.rounded.Healing
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PhotoLibrary
@@ -95,7 +96,11 @@ import com.lens035.app.ui.theme.LensShapes
 import com.lens035.app.ui.theme.LensType
 import com.lens035.core.lut.CubeParser
 import com.lens035.core.model.EffectType
+import com.lens035.core.analysis.HealSource
+import com.lens035.core.analysis.Upright
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.model.HealSpot
+import com.lens035.core.render.ShaderParams
 import com.lens035.core.model.MaskKind
 import com.lens035.core.presets.Look
 import com.lens035.core.presets.Looks
@@ -114,6 +119,7 @@ enum class EditorTool(val label: String, val icon: ImageVector) {
     ADJUST("Ayarla", Icons.Rounded.Tune),
     CROP("Kırp", Icons.Rounded.Crop),
     MASKS("Maske", Icons.Rounded.Gradient),
+    RETOUCH("Rötuş", Icons.Rounded.Healing),
 }
 
 /** Which fine-tuning panel is open over the tool strip. */
@@ -151,6 +157,9 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     var split by remember { mutableStateOf<Float?>(null) }
     var selectedMask by remember { mutableStateOf<Long?>(null) }
     var cropGuides by remember { mutableStateOf(false) }
+    var selectedHeal by remember { mutableStateOf<Long?>(null) }
+    var healBrush by remember { mutableStateOf(DEFAULT_HEAL_RADIUS) }
+    var healLuma by remember { mutableStateOf<Triple<FloatArray, Int, Int>?>(null) }
     var selectedLook by remember { mutableStateOf<String?>(null) }
     var lookBase by remember { mutableStateOf<com.lens035.core.model.EditState?>(null) }
     var lookStrength by remember { mutableStateOf(100f) }
@@ -218,6 +227,37 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
 
     val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) doExport() else Toast.makeText(context, "Galeriye kaydetmek için depolama izni gerekli.", Toast.LENGTH_LONG).show()
+    }
+
+    // ------------------------------------------------------------------ healing
+    suspend fun lumaForHealing(): Triple<FloatArray, Int, Int>? {
+        healLuma?.let { return it }
+        val px = session.analysisPixels() ?: return null
+        return withContext(Dispatchers.Default) { Triple(Upright.luma(px.argb), px.width, px.height) }.also { healLuma = it }
+    }
+    fun addHeal(uv: Offset) {
+        if (uv.x !in 0f..1f || uv.y !in 0f..1f) return
+        if (session.state.heals.size >= ShaderParams.MAX_HEALS) {
+            Toast.makeText(context, "Bir fotoğrafta en fazla ${ShaderParams.MAX_HEALS} leke giderilebilir.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val radius = healBrush
+        scope.launch {
+            val l = lumaForHealing() ?: return@launch
+            val (sx, sy) = withContext(Dispatchers.Default) { HealSource.pick(l.first, l.second, l.third, uv.x, uv.y, radius) }
+            val id = (session.state.heals.maxOfOrNull { it.id } ?: 0L) + 1L
+            session.update { it.copy(heals = it.heals + HealSpot(id, uv.x, uv.y, radius, sx, sy, 0.5f)) }
+            selectedHeal = id
+        }
+    }
+    fun repickHeal(spot: HealSpot) {
+        scope.launch {
+            val l = lumaForHealing() ?: return@launch
+            val (sx, sy) = withContext(Dispatchers.Default) {
+                HealSource.pick(l.first, l.second, l.third, spot.x, spot.y, spot.radius, avoid = listOf(spot.sx to spot.sy))
+            }
+            session.update { s -> s.copy(heals = s.heals.map { if (it.id == spot.id) it.copy(sx = sx, sy = sy) else it }) }
+        }
     }
 
     // ------------------------------------------------------------------ colour match from another photo
@@ -391,6 +431,40 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                             guides = cropGuides,
                         )
                     }
+                    EditorTool.RETOUCH -> {
+                        val bmp = session.preview
+                        if (bmp != null && !comparing) {
+                            val g = session.state.geometry
+                            val mapper = SourceViewMapper(
+                                vt,
+                                GeometryMath.sourceToOutputRowMajor(bmp.width, bmp.height, g),
+                                GeometryMath.outputToSourceRowMajor(bmp.width, bmp.height, g),
+                                bmp.width.toFloat() / bmp.height,
+                            )
+                            HealOverlay(
+                                mapper = mapper,
+                                heals = session.state.heals,
+                                selectedId = selectedHeal,
+                                sourceWidth = bmp.width,
+                                sourceHeight = bmp.height,
+                                onTap = { uv -> addHeal(uv) },
+                                onSelect = { selectedHeal = it },
+                                onMove = { id, handle, uv ->
+                                    session.preview(
+                                        session.state.copy(
+                                            heals = session.state.heals.map {
+                                                if (it.id != id) it
+                                                else if (handle == HealHandle.SPOT) it.copy(x = uv.x.coerceIn(0f, 1f), y = uv.y.coerceIn(0f, 1f))
+                                                else it.copy(sx = uv.x.coerceIn(0f, 1f), sy = uv.y.coerceIn(0f, 1f))
+                                            },
+                                        ),
+                                    )
+                                },
+                                onGestureStart = { session.beginGesture() },
+                                onGestureEnd = { session.endGesture() },
+                            )
+                        }
+                    }
                     EditorTool.MASKS -> {
                         val mask = activeMask
                         val bmp = session.preview
@@ -534,6 +608,14 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                         )
                         t == EditorTool.CROP -> CropTool(session, onGuides = { cropGuides = it })
                         t == EditorTool.MASKS -> MaskTool(session, selectedMask, { selectedMask = it }, personStatus = session.personStatus)
+                        t == EditorTool.RETOUCH -> RetouchTool(
+                            session = session,
+                            selectedId = selectedHeal,
+                            onSelect = { selectedHeal = it },
+                            brush = healBrush,
+                            onBrush = { healBrush = it },
+                            onRepick = { spot -> repickHeal(spot) },
+                        )
                     }
                 }
             }

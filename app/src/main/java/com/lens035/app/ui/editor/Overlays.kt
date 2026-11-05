@@ -44,6 +44,7 @@ import com.lens035.app.ui.theme.LensColors
 import com.lens035.core.model.CropRect
 import com.lens035.core.model.Geometry
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.model.HealSpot
 import com.lens035.core.model.LocalMask
 import com.lens035.core.model.MaskKind
 import kotlin.math.abs
@@ -258,6 +259,124 @@ class SourceViewMapper(
 }
 
 private enum class MaskHandle { NONE, CENTER, A, B, RX, RY }
+
+/** Which circle of a heal spot a drag moves. */
+enum class HealHandle { SPOT, SOURCE }
+
+/**
+ * Healing on the canvas. Tap to heal a spot there; drag a spot's circle to move it, or the
+ * selected spot's dashed source circle to take texture from elsewhere. Pinch and pan still
+ * reach the canvas, so small blemishes can be healed zoomed in. [sourceShortSide] is the
+ * source's shorter side in pixels (spot radii are fractions of it).
+ */
+@Composable
+fun HealOverlay(
+    mapper: SourceViewMapper,
+    heals: List<HealSpot>,
+    selectedId: Long?,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    onTap: (Offset) -> Unit,
+    onSelect: (Long?) -> Unit,
+    onMove: (id: Long, handle: HealHandle, uv: Offset) -> Unit,
+    onGestureStart: () -> Unit,
+    onGestureEnd: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val touch = with(density) { 22.dp.toPx() }
+    val current by rememberUpdatedState(heals)
+    val currentSelected by rememberUpdatedState(selectedId)
+    val currentMapper by rememberUpdatedState(mapper)
+    val tap by rememberUpdatedState(onTap)
+    val select by rememberUpdatedState(onSelect)
+    val move by rememberUpdatedState(onMove)
+    val start by rememberUpdatedState(onGestureStart)
+    val end by rememberUpdatedState(onGestureEnd)
+    val shortSide = min(sourceWidth, sourceHeight).toFloat().coerceAtLeast(1f)
+
+    /** A spot's radius in view pixels (measured along x through the geometry). */
+    fun viewRadius(map: SourceViewMapper, h: HealSpot): Float {
+        val c = map.toView(h.x, h.y)
+        val e = map.toView(h.x + h.radius * shortSide / sourceWidth, h.y)
+        return hypot(e.x - c.x, e.y - c.y)
+    }
+
+    Canvas(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(sourceWidth, sourceHeight) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val map = currentMapper
+                    val spots = current
+                    val sel = spots.firstOrNull { it.id == currentSelected }
+                    // The selected spot's source circle first, then any spot, newest on top.
+                    val hit: Pair<HealSpot, HealHandle>? = run {
+                        if (sel != null) {
+                            val sc = map.toView(sel.sx, sel.sy)
+                            if (hypot(down.position.x - sc.x, down.position.y - sc.y) <= max(touch, viewRadius(map, sel))) return@run sel to HealHandle.SOURCE
+                        }
+                        spots.asReversed().firstOrNull { h ->
+                            val c = map.toView(h.x, h.y)
+                            hypot(down.position.x - c.x, down.position.y - c.y) <= max(touch, viewRadius(map, h))
+                        }?.let { it to HealHandle.SPOT }
+                    }
+                    if (hit != null) {
+                        down.consume()
+                        select(hit.first.id)
+                        var dragging = false
+                        var last = down.position
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pc = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!pc.pressed) break
+                            if (!dragging && hypot(pc.position.x - down.position.x, pc.position.y - down.position.y) > viewConfiguration.touchSlop) {
+                                dragging = true
+                                start()
+                            }
+                            if (dragging) {
+                                pc.consume()
+                                last = pc.position
+                                move(hit.first.id, hit.second, map.toSource(last))
+                            }
+                        }
+                        if (dragging) end()
+                        return@awaitEachGesture
+                    }
+                    // Empty space: a tap heals there; anything else (pan, pinch) belongs to the canvas.
+                    var moved = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.size > 1) return@awaitEachGesture
+                        val pc = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                        if (hypot(pc.position.x - down.position.x, pc.position.y - down.position.y) > viewConfiguration.touchSlop) moved = true
+                        if (!pc.pressed) {
+                            if (!moved && pc.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
+                                pc.consume()
+                                tap(map.toSource(pc.position))
+                            }
+                            return@awaitEachGesture
+                        }
+                    }
+                }
+            },
+    ) {
+        val stroke = 1.5.dp.toPx()
+        for (h in heals) {
+            val c = mapper.toView(h.x, h.y)
+            val r = viewRadius(mapper, h)
+            val isSelected = h.id == selectedId
+            if (isSelected) {
+                val sc = mapper.toView(h.sx, h.sy)
+                drawLine(Color.White.copy(alpha = 0.6f), c, sc, stroke)
+                drawCircle(Color.White.copy(alpha = 0.9f), r, sc, style = Stroke(stroke, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 7f))))
+                drawCircle(LensColors.Accent, r, c, style = Stroke(stroke * 1.6f))
+            } else {
+                drawCircle(Color.White.copy(alpha = 0.75f), r, c, style = Stroke(stroke))
+            }
+        }
+    }
+}
 
 /**
  * Divider of the split compare at [fraction] of the view width: the original is on its left, the
