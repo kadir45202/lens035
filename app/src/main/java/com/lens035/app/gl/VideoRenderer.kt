@@ -11,7 +11,9 @@ import android.view.Surface
 import com.lens035.app.media.DateStamp
 import com.lens035.core.analysis.ImageStats
 import com.lens035.core.model.EditState
+import com.lens035.core.model.EffectType
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.render.CanvasLayout
 import com.lens035.core.render.RenderContext
 import com.lens035.core.render.ShaderParams
 import javax.microedition.khronos.egl.EGLConfig
@@ -138,16 +140,22 @@ class VideoRenderer(
             val workW = max(2, (vw * scale).roundToInt())
             val workH = max(2, (vh * scale).roundToInt())
             var s = state
-            if (original) s = EditState(geometry = s.geometry)
-            if (cropMode) s = s.copy(geometry = s.geometry.copy(crop = com.lens035.core.model.CropRect.FULL))
+            if (original) s = EditState(geometry = s.geometry, fx = s.fx.filter { it.type == EffectType.CANVAS })
+            if (cropMode) {
+                s = s.copy(
+                    geometry = s.geometry.copy(crop = com.lens035.core.model.CropRect.FULL),
+                    fx = s.fx.filter { it.type != EffectType.FRAME && it.type != EffectType.CANVAS },
+                )
+            }
             val out = GeometryMath.outputSize(workW, workH, s.geometry)
+            val canvas = CanvasLayout.of(s, out.width, out.height)
             var target = finalTarget
-            if (target == null || !target.matches(out.width, out.height, false)) {
+            if (target == null || !target.matches(canvas.width, canvas.height, false)) {
                 target?.release()
-                target = RenderTarget(out.width, out.height, false, mipmapped = true)
+                target = RenderTarget(canvas.width, canvas.height, false, mipmapped = true)
                 finalTarget = target
             }
-            val ctx = RenderContext(workW, workH, vw, vh, out.width, out.height, frameTimeSeconds, frameVersion.toInt())
+            val ctx = RenderContext(workW, workH, vw, vh, out.width, out.height, frameTimeSeconds, frameVersion.toInt(), canvas)
             val params = ShaderParams.build(s, ctx, stats, dateText)
             val res = FrameResources(LutCache.film(s.film?.id), LutCache.custom(s.customLut), { DateStamp.bitmap(it) })
             p.render(

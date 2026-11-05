@@ -21,6 +21,7 @@ import com.lens035.core.model.LightSettings
 import com.lens035.core.model.LocalAdjust
 import com.lens035.core.model.LocalMask
 import com.lens035.core.presets.Looks
+import com.lens035.core.render.CanvasLayout
 import com.lens035.core.render.FilmDefaults
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -197,6 +198,21 @@ class PipelineInstrumentedTest {
         // Uncropped, the narrowed bottom leaves empty corners: the projective path really ran.
         val full = render(EditState(geometry = g))
         assertTrue(luma(full.getPixel(1, full.height - 2)) < 8f)
+    }
+
+    @Test
+    fun canvasFitsTheWholePhotoAndFillsAroundIt() {
+        val black = EditState().withEffect(
+            EffectType.CANVAS.defaultInstance().withValue(EffectType.CANVAS.param("fill")!!, 1f),
+        )
+        val expected = CanvasLayout.of(black, source.width, source.height)
+        val out = render(black)
+        assertEquals(expected.width, out.width)
+        assertEquals(expected.height, out.height)
+        // 9:16 around a 4:3 photo: dark bars above and below, the photo whole in the middle.
+        assertTrue(luma(out.getPixel(out.width / 2, 2)) < 8f)
+        assertTrue(luma(out.getPixel(out.width / 2, out.height - 3)) < 8f)
+        assertTrue(luma(out.getPixel(out.width / 2, out.height / 2)) > 60f)
     }
 
     @Test

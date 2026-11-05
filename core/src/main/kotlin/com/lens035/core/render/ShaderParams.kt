@@ -16,6 +16,7 @@ import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.GradeWheel
 import com.lens035.core.model.HueBand
 import com.lens035.core.model.MaskKind
+import kotlin.math.roundToInt
 import kotlin.math.max
 import kotlin.math.min
 
@@ -34,6 +35,8 @@ data class RenderContext(
     val timeSeconds: Float = 0f,
     /** Frame index for per-frame noise in video, 0 for photos. */
     val frameIndex: Int = 0,
+    /** The canvas the photo is placed on (the render target's real size), if any. */
+    val canvas: CanvasLayout? = null,
 )
 
 /** Everything the GL pipeline needs for one frame, derived from an [EditState]. */
@@ -367,8 +370,26 @@ object ShaderParams {
             u.v3("u_dateColor", DATE_COLORS[0])
         }
 
+        // Canvas: where the photo sits in the larger target, and what fills the rest.
+        val canvasFx = fx(EffectType.CANVAS)
+        val canvas = ctx.canvas
+        val canvasOn = canvasFx != null && canvas != null && !canvas.isNone
+        val fill = canvasFx?.raw("fill")?.roundToInt()?.coerceIn(0, CanvasLayout.FILLS.size - 1) ?: 0
+        if (canvasOn) {
+            u.v4("u_canvas", 1f, fill.toFloat(), (canvasFx!!.v("corner")).coerceIn(0f, 1f), 0f)
+            u.v4("u_canvasInner", canvas!!.innerX, canvas.innerY, canvas.innerW, canvas.innerH)
+            u.v2("u_canvasSize", canvas.width.toFloat(), canvas.height.toFloat())
+        } else {
+            u.v4("u_canvas", 0f, 0f, 0f, 0f)
+            u.v4("u_canvasInner", 0f, 0f, 1f, 1f)
+            u.v2("u_canvasSize", ctx.outWidth.toFloat(), ctx.outHeight.toFloat())
+        }
+        u.v3("u_canvasColor", CanvasLayout.FILLS[fill])
+
         return halAmount > 0f || glowAmount > 0f || orton > 0f ||
-            s.hasEffect(EffectType.KIRA) || s.hasEffect(EffectType.SOFT_FOCUS) || s.hasEffect(EffectType.TILT_SHIFT)
+            s.hasEffect(EffectType.KIRA) || s.hasEffect(EffectType.SOFT_FOCUS) || s.hasEffect(EffectType.TILT_SHIFT) ||
+            // The blurred fill is the bloom pyramid's widest level.
+            (canvasOn && fill == 0)
     }
 
     private val DATE_COLORS = arrayOf(

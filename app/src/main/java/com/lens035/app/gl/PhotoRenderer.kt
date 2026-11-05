@@ -9,8 +9,11 @@ import com.lens035.app.media.DateStamp
 import com.lens035.core.analysis.ImageStats
 import com.lens035.core.model.CropRect
 import com.lens035.core.model.EditState
+import com.lens035.core.model.EffectInstance
+import com.lens035.core.model.EffectType
 import com.lens035.core.model.Geometry
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.render.CanvasLayout
 import com.lens035.core.render.RenderContext
 import com.lens035.core.render.ShaderParams
 import javax.microedition.khronos.egl.EGLConfig
@@ -60,6 +63,7 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
     private var renderedMaskKey: String? = null
     private var originalTarget: RenderTarget? = null
     private var originalGeometry: Geometry? = null
+    private var originalCanvas: EffectInstance? = null
     private var originalVersion = -1L
     private var viewWidth = 0
     private var viewHeight = 0
@@ -161,12 +165,16 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
                 renderedMaskKey != mask?.key
             ) {
                 val out = GeometryMath.outputSize(bmp.width, bmp.height, state.geometry)
-                if (target == null || !target.matches(out.width, out.height, false)) {
+                val canvas = CanvasLayout.of(state, out.width, out.height)
+                if (target == null || !target.matches(canvas.width, canvas.height, false)) {
                     target?.release()
-                    target = RenderTarget(out.width, out.height, false, mipmapped = true)
+                    target = RenderTarget(canvas.width, canvas.height, false, mipmapped = true)
                     finalTarget = target
                 }
-                val ctx = RenderContext(bmp.width, bmp.height, snap.fullWidth.coerceAtLeast(1), snap.fullHeight.coerceAtLeast(1), out.width, out.height)
+                val ctx = RenderContext(
+                    bmp.width, bmp.height, snap.fullWidth.coerceAtLeast(1), snap.fullHeight.coerceAtLeast(1),
+                    out.width, out.height, canvas = canvas,
+                )
                 val params = ShaderParams.build(state, ctx, snap.stats, snap.dateText)
                 val res = FrameResources(
                     filmLut = LutCache.film(state.film?.id),
@@ -206,15 +214,19 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
     private fun originalFor(p: LensPipeline, bmp: Bitmap, snap: Snapshot, state: EditState): RenderTarget {
         val g = state.geometry
         var t = originalTarget
-        if (t != null && originalGeometry == g && originalVersion == uploadedVersion) return t
+        if (t != null && originalGeometry == g && originalCanvas == state.effect(EffectType.CANVAS) && originalVersion == uploadedVersion) return t
         val orig = effectiveState(state, PreviewMode.ORIGINAL)
         val out = GeometryMath.outputSize(bmp.width, bmp.height, g)
-        if (t == null || !t.matches(out.width, out.height, false)) {
+        val canvas = CanvasLayout.of(orig, out.width, out.height)
+        if (t == null || !t.matches(canvas.width, canvas.height, false)) {
             t?.release()
-            t = RenderTarget(out.width, out.height, false, mipmapped = true)
+            t = RenderTarget(canvas.width, canvas.height, false, mipmapped = true)
             originalTarget = t
         }
-        val ctx = RenderContext(bmp.width, bmp.height, snap.fullWidth.coerceAtLeast(1), snap.fullHeight.coerceAtLeast(1), out.width, out.height)
+        val ctx = RenderContext(
+            bmp.width, bmp.height, snap.fullWidth.coerceAtLeast(1), snap.fullHeight.coerceAtLeast(1),
+            out.width, out.height, canvas = canvas,
+        )
         p.render(
             PipelineInput(sourceTex, InputKind.TEXTURE_TOP_DOWN, bmp.width, bmp.height, uploadedVersion),
             ShaderParams.build(orig, ctx, snap.stats, snap.dateText),
@@ -222,6 +234,7 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
             PipelineOutput.Target(t),
         )
         originalGeometry = g
+        originalCanvas = state.effect(EffectType.CANVAS)
         originalVersion = uploadedVersion
         return t
     }
@@ -249,11 +262,17 @@ class PhotoRenderer(private val context: Context, private val view: GLSurfaceVie
     companion object {
         private const val TAG = "PhotoRenderer"
 
-        /** What the preview actually shows for a given mode. */
+        /**
+         * What the preview actually shows for a given mode. The original keeps the canvas so it
+         * lines up with the edit; crop mode shows the bare frame.
+         */
         fun effectiveState(state: EditState, mode: PreviewMode): EditState = when (mode) {
             PreviewMode.NORMAL -> state
-            PreviewMode.ORIGINAL -> EditState(geometry = state.geometry)
-            PreviewMode.CROP -> state.copy(geometry = state.geometry.copy(crop = CropRect.FULL), fx = state.fx.filter { it.type != com.lens035.core.model.EffectType.FRAME })
+            PreviewMode.ORIGINAL -> EditState(geometry = state.geometry, fx = state.fx.filter { it.type == EffectType.CANVAS })
+            PreviewMode.CROP -> state.copy(
+                geometry = state.geometry.copy(crop = CropRect.FULL),
+                fx = state.fx.filter { it.type != EffectType.FRAME && it.type != EffectType.CANVAS },
+            )
         }
     }
 }

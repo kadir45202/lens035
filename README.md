@@ -9,7 +9,8 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
 ### Fotoğraf
 - **Görünümler:** Film, efekt ve ışık ayarlarını birlikte uygulayan 14 hazır görünüm (Yaz '98, Neon Gece, Sinematik, Anı…). Yoğunluk sürgüsü var. Kendi ön ayarlarını da kaydedebilirsin.
 - **32 film profili:** Renkli negatif, diya, sinema, anlık, siyah-beyaz ve deneysel. Her filmin kendi ton eğrisi, renk kaymaları, doygunluk karakteri ve gren, halation, parlama, vinyet varsayılanları var. Ok ile yoğunluk, gren, halation, parlama, solgunluk, vinyet ve sıcaklık ayarlanır.
-- **24 yaratıcı efekt:** Grain, toz, ışık sızıntısı, halation, parıltı, Kira yıldızları, güneş ışını, prizma, holo, VHS, glitch, RGB kayma, CRT, piksel, poster, duotone, balıkgözü, portre bulanıklığı, tilt-shift, zoom bulanıklığı, rüya, ayna, tarih damgası ve anlık fotoğraf çerçevesi. Efektler üst üste uygulanabilir ve her birinin kendi parametreleri var.
+- **25 yaratıcı efekt:** Grain, toz, ışık sızıntısı, halation, parıltı, Kira yıldızları, güneş ışını, prizma, holo, VHS, glitch, RGB kayma, CRT, piksel, poster, duotone, balıkgözü, portre bulanıklığı, tilt-shift, zoom bulanıklığı, rüya, ayna, tarih damgası, anlık fotoğraf çerçevesi ve tuval. Efektler üst üste uygulanabilir ve her birinin kendi parametreleri var. Sık kullandıklarına uzun basınca yıldızlanır ve "Favoriler"de toplanır.
+- **Tuval (hikâye / gönderi):** Fotoğrafı ya da videoyu kırpmadan 9:16, 4:5, 1:1 veya 16:9 tuvale sığdırır. Boşluk, fotoğrafın bulanık bir kopyasıyla ya da siyah, beyaz veya krem renkle dolar. Kenar boşluğu ve yuvarlak köşe ayarlanabilir.
 - **Lightroom tarzı ayarlar:**
   - Işık: pozlama, kontrast, açık tonlar, gölgeler, beyazlar, siyahlar
   - Renk: sıcaklık, renk tonu, canlılık, doygunluk
@@ -23,6 +24,7 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
 - **Kırpma ve perspektif:** En-boy oranları (sinema 2.39:1 dahil), 90° döndürme, aynalama, düzleştirme ve dikey/yatay perspektif düzeltme (eğik binaları doğrultur). **Otomatik** düğmesi fotoğraftaki düz çizgileri bulur, ufku düzeltir ve devrilen dikeyleri doğrultur. Boş köşeler hiç görünmez: kırpma kendiliğinden içeride kalır, ayar sırasında hizalama ızgarası çıkar.
 - **Önce / sonra:** Karşılaştır düğmesine dokununca ekran ikiye bölünür, ayırıcı sürüklenebilir. Basılı tutunca orijinalin tamamı görünür.
 - **Maskeler:** Kişi, doğrusal ve dairesel bölgesel düzenleme (en fazla 4). Kişi maskesi tek dokunuşla kişiyi seçer, ters çevrilince arka planı düzenler. Her maskede 12 ayar var.
+- **Geçmiş:** Lightroom'daki gibi her adım adıyla listelenir ("Pozlama +0.35", "Film: Portre 400", "Grain eklendi"). Bir adıma dokununca düzenleme o hâline döner.
 - **Diğer:** Geri al / yinele, histogram, ayarları kopyala/yapıştır, ilk kullanımda kısa ipuçları.
 - **Dışa aktarma:** Tam çözünürlükte (5120 px'e kadar) JPEG ya da PNG olarak Resimler › Lens035 klasörüne kaydeder ve EXIF tarih/kamera bilgisini korur.
 - **Projeler:** Her düzenleme otomatik kaydedilir, ana ekrandan kaldığın yerden devam edersin.

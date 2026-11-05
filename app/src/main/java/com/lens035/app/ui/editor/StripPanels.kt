@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -257,7 +258,9 @@ fun EffectsStrip(
                 val active = session.state.hasEffect(type)
                 ToolTile(
                     title = type.title,
-                    image = session.effectThumbs[type],
+                    // A canvas changes the picture's shape, which a thumbnail cannot show.
+                    image = if (type == EffectType.CANVAS) null else session.effectThumbs[type],
+                    placeholderIcon = if (type == EffectType.CANVAS) Icons.Rounded.AspectRatio else null,
                     selected = active,
                     active = active,
                     onClick = {

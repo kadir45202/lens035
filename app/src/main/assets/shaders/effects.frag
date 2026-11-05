@@ -59,6 +59,10 @@ uniform vec4 u_fxPoster;
 uniform vec4 u_fxScan;
 uniform vec4 u_fxDust;
 uniform vec4 u_frameFx;    // enabled, style, corner radius
+uniform vec4 u_canvas;      // enabled, fill (0 blurred photo, else colour), corner radius 0..1
+uniform vec4 u_canvasInner; // photo rectangle in canvas uv (x, y, w, h)
+uniform vec2 u_canvasSize;  // canvas size in pixels
+uniform vec3 u_canvasColor;
 uniform vec4 u_frameInner; // x, y, w, h in output uv
 uniform vec4 u_frameUv;    // scale xy, offset zw
 uniform vec4 u_fxDate;     // amount, style
@@ -106,7 +110,18 @@ float sdRoundRect(vec2 p, vec2 halfSize, float r) {
 }
 
 void main() {
-    vec2 uv = v_uv;
+    // Canvas: v_uv spans the whole canvas; everything below works in the photo's own uv.
+    vec2 cuv = v_uv;
+    vec2 uv = cuv;
+    float photoMask = 1.0;
+    if (u_canvas.x > 0.5) {
+        uv = (cuv - u_canvasInner.xy) / u_canvasInner.zw;
+        vec2 photoPx = u_canvasInner.zw * u_canvasSize;
+        float radPx = u_canvas.z * 0.5 * min(photoPx.x, photoPx.y);
+        float sd = sdRoundRect((uv - 0.5) * photoPx, photoPx * 0.5, radPx);
+        photoMask = 1.0 - smoothstep(-0.75, 0.75, sd);
+        uv = clamp(uv, 0.0, 1.0);
+    }
     float timeSeed = floor(u_frameIndex);
 
     // ---------------------------------------------------------------- frame layout
@@ -473,6 +488,19 @@ void main() {
         paper += (valueNoise(uv * u_outSize * 0.5) - 0.5) * 0.025;
         vec3 border = style > 1.5 && style < 2.5 ? vec3(0.025) : paper;
         col = mix(border, col, inside);
+    }
+
+    if (u_canvas.x > 0.5 && photoMask < 0.999) {
+        vec3 fill = u_canvasColor;
+        if (u_canvas.y < 0.5) {
+            // The photo itself, heavily blurred and scaled to cover the canvas, a little darker
+            // so the sharp photo stands out.
+            vec2 photoPx = u_canvasInner.zw * u_canvasSize;
+            float k = max(u_canvasSize.x / photoPx.x, u_canvasSize.y / photoPx.y);
+            vec2 q2 = 0.5 + (cuv - 0.5) * u_canvasSize / (photoPx * k);
+            fill = bloomTex(u_bloomC, q2) * 0.72;
+        }
+        col = mix(fill, col, photoMask);
     }
 
     o_color = vec4(clamp(col, 0.0, 1.0), 1.0);

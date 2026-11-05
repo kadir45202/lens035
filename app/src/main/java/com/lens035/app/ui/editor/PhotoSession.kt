@@ -25,7 +25,9 @@ import com.lens035.core.analysis.ImageAnalyzer
 import com.lens035.core.film.FilmCatalog
 import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
+import com.lens035.core.model.GeometryMath
 import com.lens035.core.presets.Looks
+import com.lens035.core.render.CanvasLayout
 import com.lens035.core.render.FilmDefaults
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -64,7 +66,8 @@ internal suspend fun renderToolThumbnails(
 ): Triple<Map<String, ImageBitmap>, Map<EffectType, ImageBitmap>, Map<String, ImageBitmap>> {
     val films = FilmCatalog.all
     val filmStates = films.map { EditState(film = FilmDefaults.settingsFor(it)) }
-    val effectTypes = EffectType.entries
+    // The canvas tile shows an icon: a thumbnail cannot show a change of shape.
+    val effectTypes = EffectType.entries.filter { it != EffectType.CANVAS }
     val effectStates = effectTypes.map { thumbnailEffectState(it) }
     val lookStates = Looks.all.map { it.state }
     val all = app.offscreen.execute { gl -> gl.renderAll(thumb, filmStates + effectStates + lookStates, stats, dateText) }
@@ -279,9 +282,11 @@ class PhotoSession(
     }
 
     /** RGB + luminance histograms (4 x 256 bins) of a small render of [s]. */
-    suspend fun histogram(s: EditState): IntArray? {
+    suspend fun histogram(edit: EditState): IntArray? {
         val bmp = preview ?: return null
         val src = histSource ?: withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(bmp, 220) }.also { histSource = it }
+        // The photo's tones only: a canvas fill would swamp the histogram.
+        val s = edit.withoutEffect(EffectType.CANVAS)
         return try {
             val mask = if (s.needsPersonMask) personMask else null
             val out = app.offscreen.execute { gl -> gl.render(src, s, stats, dateText, meta.width, meta.height, mask) }
@@ -344,6 +349,14 @@ class PhotoSession(
         val maxTex = app.offscreen.execute { it.maxTextureSize }
         val longest = max(meta.width, meta.height)
         var side = minOf(options.size.maxSide, maxTex, if (longest > 0) longest else options.size.maxSide)
+        // A canvas grows around the photo: keep the whole canvas within the GPU's texture limit.
+        if (longest > 0 && s.hasEffect(EffectType.CANVAS)) {
+            val k = side / longest.toFloat()
+            val photo = GeometryMath.outputSize((meta.width * k).roundToInt().coerceAtLeast(1), (meta.height * k).roundToInt().coerceAtLeast(1), s.geometry)
+            val canvas = CanvasLayout.of(s, photo.width, photo.height)
+            val canvasLongest = max(canvas.width, canvas.height)
+            if (canvasLongest > maxTex) side = (side * maxTex / canvasLongest.toFloat()).roundToInt().coerceAtLeast(512)
+        }
         var lastError: Throwable? = null
         repeat(3) {
             try {
