@@ -293,6 +293,8 @@ data class LocalMask(
     val invert: Boolean = false,
     val enabled: Boolean = true,
     val adjust: LocalAdjust = LocalAdjust(),
+    /** Optional limit to a brightness band or a colour, applied after [invert]. */
+    val range: MaskRange = MaskRange(),
 ) {
     companion object {
         fun newLinear(id: Long) = LocalMask(
@@ -385,4 +387,26 @@ data class HealSpot(
     val sy: Float,
     /** 0 hard edge .. 1 very soft. */
     val feather: Float = 0.5f,
+)
+
+@Serializable
+enum class RangeMode {
+    @SerialName("none") NONE,
+    @SerialName("luminance") LUMINANCE,
+    @SerialName("color") COLOR,
+}
+
+/**
+ * Range limit of a local mask, like Lightroom's range mask: only pixels whose brightness lies in
+ * [low]..[high] (percent), or whose hue is within [tolerance] of [hue] (degrees), are affected.
+ * [softness] widens the edges of the band (0..100).
+ */
+@Serializable
+data class MaskRange(
+    val mode: RangeMode = RangeMode.NONE,
+    val low: Float = 0f,
+    val high: Float = 100f,
+    val hue: Float = 210f,
+    val tolerance: Float = 30f,
+    val softness: Float = 50f,
 )

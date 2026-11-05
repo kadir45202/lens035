@@ -51,6 +51,8 @@ import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.LocalAdjust
 import com.lens035.core.model.LocalMask
 import com.lens035.core.model.MaskKind
+import com.lens035.core.model.MaskRange
+import com.lens035.core.model.RangeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -255,6 +257,12 @@ fun maskLabel(m: LocalMask, index: Int): String = when (m.kind) {
     MaskKind.PERSON -> "Kişi"
 } + " " + (index + 1)
 
+private fun rangeLabel(mode: RangeMode): String = when (mode) {
+    RangeMode.NONE -> "Tümü"
+    RangeMode.LUMINANCE -> "Parlaklık"
+    RangeMode.COLOR -> "Renk"
+}
+
 /** One line on the state of person detection, or null when there is nothing to say. */
 fun personStatusText(status: PersonStatus?): String? = when (status) {
     PersonStatus.SEARCHING, PersonStatus.UNKNOWN -> "Kişi aranıyor…"
@@ -350,6 +358,34 @@ fun MaskTool(session: EditSession, selectedId: Long?, onSelect: (Long?) -> Unit,
             }
             if (selected.kind == MaskKind.RADIAL) {
                 item { SliderItem("Yumuşaklık", selected.feather, 0f, 100f, 50f, session) { v -> setMask { it.copy(feather = v) } } }
+            }
+            // Range: limit the mask to a brightness band or a colour (Lightroom's range mask).
+            item {
+                Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text("Aralık", style = LensType.Label, color = LensColors.Muted, modifier = Modifier.padding(start = 20.dp, bottom = 4.dp))
+                    ChipRow(RangeMode.entries, selected.range.mode, { rangeLabel(it) }, { mode ->
+                        session.update { s -> s.copy(masks = s.masks.map { if (it.id == selected.id) it.copy(range = it.range.copy(mode = mode)) else it }) }
+                    })
+                }
+            }
+            val range = selected.range
+            fun setRange(t: (MaskRange) -> MaskRange) = setMask { it.copy(range = t(it.range)) }
+            when (range.mode) {
+                RangeMode.LUMINANCE -> {
+                    item { SliderItem("Alt sınır", range.low, 0f, 100f, 0f, session, ValueFormat.PLAIN) { v -> setRange { it.copy(low = v) } } }
+                    item { SliderItem("Üst sınır", range.high, 0f, 100f, 100f, session, ValueFormat.PLAIN) { v -> setRange { it.copy(high = v) } } }
+                    item { SliderItem("Aralık yumuşaklığı", range.softness, 0f, 100f, 50f, session, ValueFormat.PLAIN) { v -> setRange { it.copy(softness = v) } } }
+                }
+                RangeMode.COLOR -> {
+                    item {
+                        SliderItem("Ton", range.hue, 0f, 360f, 210f, session, ValueFormat.PLAIN, brush = com.lens035.app.ui.components.SliderBrushes.hueFull) { v ->
+                            setRange { it.copy(hue = v) }
+                        }
+                    }
+                    item { SliderItem("Tolerans", range.tolerance, 0f, 100f, 30f, session, ValueFormat.PLAIN) { v -> setRange { it.copy(tolerance = v) } } }
+                    item { SliderItem("Aralık yumuşaklığı", range.softness, 0f, 100f, 50f, session, ValueFormat.PLAIN) { v -> setRange { it.copy(softness = v) } } }
+                }
+                RangeMode.NONE -> Unit
             }
             item { SliderItem("Pozlama", a.exposure, -4f, 4f, 0f, session, ValueFormat.EV) { v -> setAdjust { it.copy(exposure = v) } } }
             item { SliderItem("Kontrast", a.contrast, -100f, 100f, 0f, session) { v -> setAdjust { it.copy(contrast = v) } } }

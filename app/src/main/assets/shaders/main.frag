@@ -71,6 +71,7 @@ uniform float u_skin;
 uniform int u_maskCount;
 uniform vec4 u_maskGeo[8];
 uniform vec4 u_maskAdj[12];
+uniform vec4 u_maskRange[4]; // mode (0 none, 1 brightness, 2 colour), band a, band b, softness
 
 uniform sampler2D u_personMask; // person segmentation (source space, r = confidence)
 uniform float u_hasPersonMask;
@@ -102,6 +103,25 @@ float maskWeight(vec4 g0, vec4 g1, vec2 uv) {
         w = 1.0 - smoothstep(1.0 - f, 1.0, dist);
     }
     return g0.y > 0.5 ? 1.0 - w : w;
+}
+
+// Range limit of a mask: brightness band [a, b], or hue a (0..1) within tolerance b.
+float rangeWeight(vec4 r, vec3 enc, float p) {
+    if (r.x < 0.5) return 1.0;
+    float soft = r.w;
+    if (r.x < 1.5) {
+        float f = 0.02 + 0.2 * soft;
+        float lo = r.y > 0.001 ? smoothstep(r.y - f, r.y + f, p) : 1.0;
+        float hi = r.z < 0.999 ? 1.0 - smoothstep(r.z - f, r.z + f, p) : 1.0;
+        return lo * hi;
+    }
+    vec3 hsv = rgb2hsv(clamp(enc, 0.0, 1.0));
+    float d = abs(hsv.x - r.y);
+    d = min(d, 1.0 - d);
+    float tol = 0.015 + 0.2 * r.z;
+    float f = 0.01 + 0.12 * soft;
+    // Greys have no hue to speak of.
+    return (1.0 - smoothstep(tol, tol + f, d)) * smoothstep(0.04, 0.18, hsv.y);
 }
 
 vec3 sampleLut(sampler3D lut, float size, vec3 c) {
@@ -147,7 +167,7 @@ void main() {
     float texAmt = u_texture;
     for (int i = 0; i < 4; i++) {
         if (i >= u_maskCount) break;
-        float w = maskWeight(u_maskGeo[i * 2], u_maskGeo[i * 2 + 1], uv);
+        float w = maskWeight(u_maskGeo[i * 2], u_maskGeo[i * 2 + 1], uv) * rangeWeight(u_maskRange[i], src, srcP);
         vec4 a0 = u_maskAdj[i * 3];
         vec4 a1 = u_maskAdj[i * 3 + 1];
         vec4 a2 = u_maskAdj[i * 3 + 2];

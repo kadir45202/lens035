@@ -16,6 +16,7 @@ import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.GradeWheel
 import com.lens035.core.model.HueBand
 import com.lens035.core.model.MaskKind
+import com.lens035.core.model.RangeMode
 import kotlin.math.roundToInt
 import kotlin.math.max
 import kotlin.math.min
@@ -234,6 +235,27 @@ object ShaderParams {
         }
         u.v4a("u_maskGeo", geo)
         u.v4a("u_maskAdj", adj)
+        // Range limits: mode (0 none, 1 brightness, 2 colour), then the band.
+        val range = FloatArray(MAX_MASKS * 4)
+        masks.forEachIndexed { i, m ->
+            val r = m.range
+            val o = i * 4
+            when (r.mode) {
+                RangeMode.NONE -> Unit
+                RangeMode.LUMINANCE -> {
+                    range[o] = 1f
+                    range[o + 1] = (minOf(r.low, r.high) / 100f).coerceIn(0f, 1f)
+                    range[o + 2] = (maxOf(r.low, r.high) / 100f).coerceIn(0f, 1f)
+                }
+                RangeMode.COLOR -> {
+                    range[o] = 2f
+                    range[o + 1] = ((r.hue % 360f + 360f) % 360f) / 360f
+                    range[o + 2] = (r.tolerance / 100f).coerceIn(0f, 1f)
+                }
+            }
+            range[o + 3] = (r.softness / 100f).coerceIn(0f, 1f)
+        }
+        u.v4a("u_maskRange", range)
     }
 
     /** Returns true when the bloom pyramid of the graded image is required. */
