@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+**/build/
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.keystore
+# The fixed, non-secret side-loading key (see README); private store keys stay ignored.
+!keystore/lens035-debug.keystore
+!debug.keystore
+.kotlin/
