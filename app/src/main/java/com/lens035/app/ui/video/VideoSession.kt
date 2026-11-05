@@ -19,6 +19,7 @@ import com.lens035.app.data.Project
 import com.lens035.app.gl.VideoRenderer
 import com.lens035.app.media.BitmapLoader
 import com.lens035.app.media.DateStamp
+import com.lens035.app.ui.editor.AnalysisPixels
 import com.lens035.app.ui.editor.EditSession
 import com.lens035.app.ui.editor.renderToolThumbnails
 import com.lens035.core.analysis.ImageAnalyzer
@@ -64,6 +65,7 @@ class VideoSession(
         private set
 
     private var thumbSource: Bitmap? = null
+    private var analysisFrame: Bitmap? = null
     private var saveJob: Job? = null
 
     /** The preview pipeline works at up to 1280 px; overlays use the same size. */
@@ -111,6 +113,7 @@ class VideoSession(
                     }
                     val thumb = withContext(Dispatchers.Default) { BitmapLoader.thumbnail(frame, 136, 168) }
                     thumbSource = thumb
+                    analysisFrame = withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(frame, 320) }
                     val (f, e, l) = renderToolThumbnails(app, thumb, stats, dateText)
                     filmThumbs = f
                     effectThumbs = e
@@ -198,6 +201,19 @@ class VideoSession(
         }
     }
 
+    override suspend fun analysisPixels(): AnalysisPixels? {
+        val bmp = analysisFrame ?: return null
+        // The analysis must see the frame the way the preview does; skip if the orientation differs.
+        val frameLandscape = bmp.width >= bmp.height
+        val previewLandscape = frameWidth >= frameHeight
+        if (frameLandscape != previewLandscape && bmp.width != bmp.height) return null
+        return withContext(Dispatchers.Default) {
+            val px = IntArray(bmp.width * bmp.height)
+            bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+            AnalysisPixels(px, bmp.width, bmp.height)
+        }
+    }
+
     suspend fun saveProject() {
         val src = thumbSource ?: return
         val s = state
@@ -214,6 +230,7 @@ class VideoSession(
 
     fun dispose() {
         saveJob?.cancel()
+        analysisFrame = null
     }
 
     companion object {

@@ -113,7 +113,13 @@ abstract class EditSession(initial: EditState) {
     /** Renders a small preview of an arbitrary state (user presets); null if unavailable. */
     abstract suspend fun renderThumbnail(s: EditState): ImageBitmap?
 
+    /** A small packed-ARGB copy of the picture for analysis (auto upright), or null if not ready. */
+    open suspend fun analysisPixels(): AnalysisPixels? = null
+
     companion object {
         private const val MAX_HISTORY = 80
     }
 }
+
+/** Packed ARGB pixels of the unedited picture in source orientation. */
+class AnalysisPixels(val argb: IntArray, val width: Int, val height: Int)

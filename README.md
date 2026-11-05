@@ -20,9 +20,10 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
   - .cube LUT içe aktarma
 - **Luminar'dan esinlenen akıllı araçlar:** Otomatik geliştir (fotoğrafı analiz eder), yapı, gökyüzü, altın saat, ışıltı ve cilt yumuşatma. Fotoğrafta kişi varsa cilt yumuşatma yalnızca kişiye uygulanır.
 - **Portre bulanıklığı:** Kişi cihaz üzerinde bulunur (ML Kit, internet gerekmez). Kişi net kalır, arka plan ayarlanabilir şiddette bulanıklaşır. Arka plan bulanıklığı yalnızca arka plan piksellerinden üretildiği için kişinin etrafında hale oluşmaz. Işık topları ve kenar yumuşaklığı ayarlanabilir.
-- **Kırpma ve perspektif:** En-boy oranları (sinema 2.39:1 dahil), 90° döndürme, aynalama, düzleştirme ve dikey/yatay perspektif düzeltme (eğik binaları doğrultur). Boş köşeler hiç görünmez: kırpma kendiliğinden içeride kalır, ayar sırasında hizalama ızgarası çıkar.
+- **Kırpma ve perspektif:** En-boy oranları (sinema 2.39:1 dahil), 90° döndürme, aynalama, düzleştirme ve dikey/yatay perspektif düzeltme (eğik binaları doğrultur). **Otomatik** düğmesi fotoğraftaki düz çizgileri bulur, ufku düzeltir ve devrilen dikeyleri doğrultur. Boş köşeler hiç görünmez: kırpma kendiliğinden içeride kalır, ayar sırasında hizalama ızgarası çıkar.
+- **Önce / sonra:** Karşılaştır düğmesine dokununca ekran ikiye bölünür, ayırıcı sürüklenebilir. Basılı tutunca orijinalin tamamı görünür.
 - **Maskeler:** Kişi, doğrusal ve dairesel bölgesel düzenleme (en fazla 4). Kişi maskesi tek dokunuşla kişiyi seçer, ters çevrilince arka planı düzenler. Her maskede 12 ayar var.
-- **Diğer:** Geri al / yinele, basılı tutunca orijinali gösterme, histogram, ayarları kopyala/yapıştır, ilk kullanımda kısa ipuçları.
+- **Diğer:** Geri al / yinele, histogram, ayarları kopyala/yapıştır, ilk kullanımda kısa ipuçları.
 - **Dışa aktarma:** Tam çözünürlükte (5120 px'e kadar) JPEG ya da PNG olarak Resimler › Lens035 klasörüne kaydeder ve EXIF tarih/kamera bilgisini korur.
 - **Projeler:** Her düzenleme otomatik kaydedilir, ana ekrandan kaldığın yerden devam edersin.
 
@@ -57,7 +58,7 @@ core/   Saf Kotlin, Android bağımlılığı yok, JVM'de birim testli
   film/      Parametrik film modelleri → 33³ 3D LUT üretimi
   color/     Renk bilimi (sRGB, HSV, beyaz dengesi, eğriler)
   render/    EditState → shader uniform eşlemesi
-  analysis/  Histogram, pus tahmini, otomatik geliştirme
+  analysis/  Histogram, pus tahmini, otomatik geliştirme, çizgi bulma ve otomatik düzeltme
   pose/      Poz şablonları ve eşleştirme / talimat üretimi
   (geometri) Çeyrek dönüş → aynalama → perspektif (H = K·R·K⁻¹) → düzleştirme → kırpma, tek 3x3 projektif matris
 app/
@@ -72,7 +73,7 @@ app/
 Tek bir `LensPipeline` dört yerde aynı şekilde çalışır: canlı fotoğraf önizlemesi, tam çözünürlükte dışa aktarma, video önizlemesi (ExoPlayer → SurfaceTexture) ve video dışa aktarma (Media3 Transformer).
 
 ## Testler
-- `./gradlew :core:test`: renk bilimi, eğriler, 32 filmin LUT doğruluğu, geometri ve perspektif (merkez korunumu, ters dönüşüm, boş köşesiz kırpma, döndürme/aynalamada birebir tutarlılık), .cube ayrıştırma, shader eşlemesi, kişi maskesi kuralları, poz eşleştirme
+- `./gradlew :core:test`: renk bilimi, eğriler, 32 filmin LUT doğruluğu, geometri ve perspektif (merkez korunumu, ters dönüşüm, boş köşesiz kırpma, döndürme/aynalamada birebir tutarlılık), otomatik düzeltme (sentetik eğik sahnelerde açıyı geri bulma), .cube ayrıştırma, shader eşlemesi, kişi maskesi kuralları, poz eşleştirme
 - `./gradlew :app:connectedDebugAndroidTest`: cihaz/emülatör GPU'sunda tüm film, efekt ve görünümlerin render'ı, görüntü yönü, portre bulanıklığının kişiyi net bırakması, kişi maskesinin yalnızca kişiyi etkilemesi, Media3 ile video dışa aktarma, uygulamanın açılışı
 - Shader'lar geliştirme sırasında WebGL2 (OpenGL ES 3.0 ile aynı dil) üzerinde gerçek fotoğraflarla görsel olarak doğrulandı
 

@@ -200,6 +200,17 @@ class PhotoSession(
         }
     }
 
+    override suspend fun analysisPixels(): AnalysisPixels? {
+        val bmp = preview ?: return null
+        return withContext(Dispatchers.Default) {
+            val small = BitmapLoader.scaledCopy(bmp, ANALYSIS_MAX_SIDE)
+            val px = IntArray(small.width * small.height)
+            small.getPixels(px, 0, small.width, 0, 0, small.width, small.height)
+            if (small !== bmp) small.recycle()
+            AnalysisPixels(px, small.width, small.height)
+        }
+    }
+
     /** Finds the person in the photo once, on the device. Later calls reuse the result. */
     fun ensurePersonMask() {
         val bmp = preview ?: return
@@ -382,6 +393,9 @@ class PhotoSession(
         const val PREVIEW_MAX_SIDE = 2048
         const val THUMB_W = 136
         const val THUMB_H = 168
+
+        /** Long side used for line analysis (auto upright). */
+        const val ANALYSIS_MAX_SIDE = 320
 
         /** Segmentation input size: the model itself works at 256 px, so more is wasted time. */
         const val SEGMENT_MAX_SIDE = 512

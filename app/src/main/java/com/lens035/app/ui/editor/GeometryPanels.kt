@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.InvertColors
@@ -23,9 +24,11 @@ import androidx.compose.material.icons.rounded.Rotate90DegreesCcw
 import androidx.compose.material.icons.rounded.Rotate90DegreesCw
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +42,7 @@ import com.lens035.app.ui.components.LensSlider
 import com.lens035.app.ui.components.ValueFormat
 import com.lens035.app.ui.theme.LensColors
 import com.lens035.app.ui.theme.LensType
+import com.lens035.core.analysis.Upright
 import com.lens035.core.model.AspectRatio
 import com.lens035.core.model.CropRect
 import com.lens035.core.model.EditState
@@ -47,6 +51,10 @@ import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.LocalAdjust
 import com.lens035.core.model.LocalMask
 import com.lens035.core.model.MaskKind
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Oriented frame size of the preview for the current geometry. */
 fun orientedSize(session: EditSession): Pair<Int, Int> {
@@ -113,9 +121,43 @@ fun CropTool(session: EditSession, onGuides: (Boolean) -> Unit = {}) {
     var dragBase by remember { mutableStateOf<CropRect?>(null) }
     var dragKeepsLargest by remember { mutableStateOf(false) }
     var dragAspect by remember { mutableStateOf(0f) }
+    val scope = rememberCoroutineScope()
+    var autoBusy by remember { mutableStateOf(false) }
+    var autoMessage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(autoMessage) {
+        if (autoMessage != null) {
+            delay(2600)
+            autoMessage = null
+        }
+    }
 
     fun cropAspect(geo: Geometry): Float =
         GeometryMath.aspectValue(geo.aspect, owf, ohf).takeIf { it > 0f } ?: (geo.crop.width * owf / (geo.crop.height * ohf))
+
+    /** Levels the picture and fixes converging verticals from the straight lines it finds. */
+    fun autoUpright() {
+        if (autoBusy) return
+        autoBusy = true
+        scope.launch {
+            val px = session.analysisPixels()
+            val geo = session.state.geometry
+            val result = px?.let { withContext(Dispatchers.Default) { Upright.analyze(it.argb, it.width, it.height, geo) } }
+            autoBusy = false
+            when {
+                result == null -> autoMessage = "Belirgin düz çizgi bulunamadı."
+                result.isNoChange && !geo.hasCorrection -> autoMessage = "Zaten düz görünüyor."
+                else -> {
+                    session.update { st ->
+                        val ng = st.geometry.copy(straighten = result.straighten, vertical = result.vertical, horizontal = 0f)
+                        val ratio = GeometryMath.aspectValue(ng.aspect, owf, ohf)
+                        st.copy(geometry = ng.copy(crop = GeometryMath.maxCropForAspect(ratio, owf, ohf, ng)))
+                    }
+                    correction = if (result.vertical != 0f) Correction.VERTICAL else Correction.STRAIGHTEN
+                    autoMessage = if (result.isNoChange) "Düzeltmeler sıfırlandı." else null
+                }
+            }
+        }
+    }
 
     fun setAspect(a: AspectRatio) {
         val ratio = GeometryMath.aspectValue(a, owf, ohf)
@@ -126,12 +168,27 @@ fun CropTool(session: EditSession, onGuides: (Boolean) -> Unit = {}) {
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         ChipRow(AspectRatio.entries, g.aspect, { it.label }, { setAspect(it) })
         Spacer(Modifier.height(2.dp))
-        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            item {
+                GhostPill(
+                    if (autoBusy) "Bakılıyor…" else "Otomatik",
+                    onClick = { autoUpright() },
+                    icon = Icons.Rounded.AutoFixHigh,
+                    enabled = !autoBusy,
+                )
+            }
             items(Correction.entries) { c ->
                 val v = c.valueOf(g)
                 val text = if (v == 0f) c.label else c.label + " " + com.lens035.app.ui.components.formatValue(v, c.format)
                 LensChip(text, c == correction, { correction = c })
             }
+        }
+        autoMessage?.let {
+            Text(it, style = LensType.Meta, color = LensColors.Faint, modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
         }
         LensSlider(
             label = correction.label,
