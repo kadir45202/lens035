@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.lens035.app.Lens035App
 import com.lens035.app.data.Project
 import com.lens035.app.gl.GlException
+import com.lens035.app.gl.LutCache
 import com.lens035.app.gl.PersonMaskData
 import com.lens035.app.media.BitmapLoader
 import com.lens035.app.media.DateStamp
@@ -22,6 +23,7 @@ import com.lens035.app.media.ImageMeta
 import com.lens035.app.media.MediaSaver
 import com.lens035.app.media.PersonSegmenter
 import com.lens035.core.analysis.ImageAnalyzer
+import com.lens035.core.color.ColorTransfer
 import com.lens035.core.film.FilmCatalog
 import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
@@ -212,6 +214,42 @@ class PhotoSession(
             if (small !== bmp) small.recycle()
             AnalysisPixels(px, small.width, small.height)
         }
+    }
+
+    /**
+     * Builds a colour-match LUT that takes this photo, as edited so far (without a custom LUT),
+     * towards the colours of [reference], saves it with the custom LUTs and returns its file name.
+     */
+    suspend fun createColorMatch(reference: Uri): String {
+        val bmp = preview ?: throw IllegalStateException("Fotoğraf henüz hazır değil.")
+        val small = histSource ?: withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(bmp, 220) }.also { histSource = it }
+        val current = state.copy(customLut = null).withoutEffect(EffectType.CANVAS)
+        val mask = if (current.needsPersonMask) personMask else null
+        val rendered = app.offscreen.execute { gl -> gl.render(small, current, stats, dateText, meta.width, meta.height, mask) }
+        val targetPx = withContext(Dispatchers.Default) { argbPixels(rendered).also { rendered.recycle() } }
+        val ref = withContext(Dispatchers.IO) { BitmapLoader.decode(context, reference, 256) }
+        val refPx = withContext(Dispatchers.Default) { argbPixels(ref.bitmap).also { ref.bitmap.recycle() } }
+        val cube = withContext(Dispatchers.Default) {
+            val lut = ColorTransfer.buildLut(ColorTransfer.stats(targetPx), ColorTransfer.stats(refPx))
+            ColorTransfer.toCube(lut, "Lens035 renk eşleştirme")
+        }
+        return withContext(Dispatchers.IO) {
+            val dir = LutCache.directory() ?: throw IllegalStateException("LUT klasörü yok.")
+            var n = 1
+            var name: String
+            do {
+                name = "Eşleşme $n.cube"
+                n++
+            } while (File(dir, name).exists())
+            File(dir, name).writeText(cube)
+            name
+        }
+    }
+
+    private fun argbPixels(b: Bitmap): IntArray {
+        val px = IntArray(b.width * b.height)
+        b.getPixels(px, 0, b.width, 0, 0, b.width, b.height)
+        return px
     }
 
     /** Finds the person in the photo once, on the device. Later calls reuse the result. */

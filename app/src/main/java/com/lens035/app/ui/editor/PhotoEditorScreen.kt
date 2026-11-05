@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.CameraRoll
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Flare
@@ -98,6 +99,7 @@ import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.MaskKind
 import com.lens035.core.presets.Look
 import com.lens035.core.presets.Looks
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -218,6 +220,29 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
         if (granted) doExport() else Toast.makeText(context, "Galeriye kaydetmek için depolama izni gerekli.", Toast.LENGTH_LONG).show()
     }
 
+    // ------------------------------------------------------------------ colour match from another photo
+    val matchPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val name = session.createColorMatch(uri)
+                if (name !in customLuts) customLuts.add(name)
+                LutCache.invalidateCustom(name)
+                session.update { it.copy(customLut = name, customLutStrength = 100f) }
+                // Show where it landed: the LUT panel with its strength slider.
+                detail = null
+                tool = EditorTool.ADJUST
+                adjustPanel = AdjustPanel.LUT
+                Toast.makeText(context, "Renkler eşleştirildi. Yoğunluğu buradan ayarlayabilirsin.", Toast.LENGTH_SHORT).show()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Renkler eşleştirilemedi.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    fun matchColors() = matchPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+
     // ------------------------------------------------------------------ batch: this edit on other photos
     var batchUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var batchUi by remember { mutableStateOf<BatchUi?>(null) }
@@ -316,6 +341,10 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                         showPresetDialog = true
                         menuOpen = false
                     })
+                    DropdownMenuItem(text = { Text("Renkleri başka fotoğraftan al") }, onClick = {
+                        menuOpen = false
+                        matchColors()
+                    }, leadingIcon = { Icon(Icons.Rounded.Colorize, null) })
                     DropdownMenuItem(text = { Text("Başka fotoğraflara uygula") }, onClick = {
                         menuOpen = false
                         batchPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -501,6 +530,7 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                                     LutCache.invalidateCustom(name)
                                 }
                             },
+                            onMatchColors = { matchColors() },
                         )
                         t == EditorTool.CROP -> CropTool(session, onGuides = { cropGuides = it })
                         t == EditorTool.MASKS -> MaskTool(session, selectedMask, { selectedMask = it }, personStatus = session.personStatus)

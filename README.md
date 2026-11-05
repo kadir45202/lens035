@@ -19,6 +19,7 @@ Kullanımı iki katmanlı. Tek dokunuşla bir görünüm, film ya da efekt seçe
   - Detay: keskinleştirme ve parazit azaltma
   - Efektler: doku, netlik, pus giderme, vinyet, gren
   - .cube LUT içe aktarma
+- **Renk eşleştirme:** Beğendiğin herhangi bir fotoğrafı seç, onun renk havası düzenlediğin fotoğrafa aktarılsın (menü › "Renkleri başka fotoğraftan al" ya da Ayarla › LUT). Sonuç bir LUT olarak saklanır; yoğunluğu ayarlanabilir ve başka fotoğraflarda da kullanılabilir.
 - **Luminar'dan esinlenen akıllı araçlar:** Otomatik geliştir (fotoğrafı analiz eder), yapı, gökyüzü, altın saat, ışıltı ve cilt yumuşatma. Fotoğrafta kişi varsa cilt yumuşatma yalnızca kişiye uygulanır.
 - **Portre bulanıklığı:** Kişi cihaz üzerinde bulunur (ML Kit, internet gerekmez). Kişi net kalır, arka plan ayarlanabilir şiddette bulanıklaşır. Arka plan bulanıklığı yalnızca arka plan piksellerinden üretildiği için kişinin etrafında hale oluşmaz. Işık topları ve kenar yumuşaklığı ayarlanabilir.
 - **Kırpma ve perspektif:** En-boy oranları (sinema 2.39:1 dahil), 90° döndürme, aynalama, düzleştirme ve dikey/yatay perspektif düzeltme (eğik binaları doğrultur). **Otomatik** düğmesi fotoğraftaki düz çizgileri bulur, ufku düzeltir ve devrilen dikeyleri doğrultur. Boş köşeler hiç görünmez: kırpma kendiliğinden içeride kalır, ayar sırasında hizalama ızgarası çıkar.

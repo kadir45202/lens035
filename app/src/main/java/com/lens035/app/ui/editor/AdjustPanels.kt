@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +74,8 @@ fun AdjustTool(
     customLuts: List<String>,
     onImportLut: () -> Unit,
     onDeleteLut: (String) -> Unit,
+    /** Colour match from a reference photo; null where it is not offered. */
+    onMatchColors: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         ChipRow(AdjustPanel.entries, panel, { it.label }, onPanel)
@@ -87,7 +90,7 @@ fun AdjustTool(
                 AdjustPanel.CURVE -> CurvePanel(session)
                 AdjustPanel.DETAIL -> DetailPanel(session)
                 AdjustPanel.EFFECTS -> LrEffectsPanel(session)
-                AdjustPanel.LUT -> LutPanel(session, customLuts, onImportLut, onDeleteLut)
+                AdjustPanel.LUT -> LutPanel(session, customLuts, onImportLut, onDeleteLut, onMatchColors)
             }
         }
     }
@@ -264,10 +267,15 @@ private fun LrEffectsPanel(session: EditSession) {
 }
 
 @Composable
-private fun LutPanel(session: EditSession, luts: List<String>, onImport: () -> Unit, onDelete: (String) -> Unit) {
+private fun LutPanel(session: EditSession, luts: List<String>, onImport: () -> Unit, onDelete: (String) -> Unit, onMatch: (() -> Unit)?) {
     val current = session.state.customLut
     LazyColumn(Modifier.fillMaxWidth()) {
-        item { Hint("Kendi .cube LUT dosyalarını içe aktar; filmlerin üzerine uygulanır.") }
+        item {
+            Hint(
+                if (onMatch != null) "Beğendiğin bir fotoğrafın renklerini eşleştir ya da kendi .cube LUT dosyalarını içe aktar; filmlerin üzerine uygulanır."
+                else "Kendi .cube LUT dosyalarını içe aktar; filmlerin üzerine uygulanır.",
+            )
+        }
         item {
             LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item { LensChip("Yok", current == null, { session.update { it.copy(customLut = null) } }) }
@@ -281,6 +289,7 @@ private fun LutPanel(session: EditSession, luts: List<String>, onImport: () -> U
         }
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (onMatch != null) GhostPill("Renk eşleştir", onClick = onMatch, icon = Icons.Rounded.Colorize)
                 GhostPill("LUT içe aktar", onClick = onImport, icon = Icons.Rounded.FileOpen)
                 if (current != null) {
                     GhostPill("Sil", onClick = {
