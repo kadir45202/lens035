@@ -8,6 +8,7 @@ import com.lens035.app.media.DateStamp
 import com.lens035.core.analysis.ImageStats
 import com.lens035.core.model.EditState
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.render.CanvasLayout
 import com.lens035.core.render.RenderContext
 import com.lens035.core.render.ShaderParams
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -86,8 +87,9 @@ class OffscreenGl(val pipeline: LensPipeline) {
         var target: RenderTarget? = null
         try {
             val out = GeometryMath.outputSize(source.width, source.height, state.geometry)
-            target = RenderTarget(out.width, out.height, false)
-            val ctx = RenderContext(source.width, source.height, fullWidth, fullHeight, out.width, out.height)
+            val canvas = CanvasLayout.of(state, out.width, out.height)
+            target = RenderTarget(canvas.width, canvas.height, false)
+            val ctx = RenderContext(source.width, source.height, fullWidth, fullHeight, out.width, out.height, canvas = canvas)
             val params = ShaderParams.build(state, ctx, stats, dateText)
             val res = FrameResources(
                 filmLut = LutCache.film(state.film?.id),
@@ -100,7 +102,7 @@ class OffscreenGl(val pipeline: LensPipeline) {
                 params, res, PipelineOutput.Target(target),
             )
             target.bind()
-            return GlUtil.readPixels(out.width, out.height)
+            return GlUtil.readPixels(canvas.width, canvas.height)
         } finally {
             target?.release()
             GlUtil.deleteTexture(tex)

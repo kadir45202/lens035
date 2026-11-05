@@ -293,6 +293,8 @@ data class LocalMask(
     val invert: Boolean = false,
     val enabled: Boolean = true,
     val adjust: LocalAdjust = LocalAdjust(),
+    /** Optional limit to a brightness band or a colour, applied after [invert]. */
+    val range: MaskRange = MaskRange(),
 ) {
     companion object {
         fun newLinear(id: Long) = LocalMask(
@@ -333,6 +335,8 @@ data class EditState(
     /** Optional imported .cube look, referenced by file name in the app's LUT folder. */
     val customLut: String? = null,
     val customLutStrength: Float = 100f,
+    /** Healed blemishes, in source coordinates (photos only). */
+    val heals: List<HealSpot> = emptyList(),
 ) {
     val isDefault: Boolean get() = this.copy(version = CURRENT_VERSION) == EditState()
 
@@ -348,22 +352,61 @@ data class EditState(
     fun withoutEffect(type: EffectType): EditState = copy(fx = fx.filter { it.type != type })
 
     /** The look-only part of an edit, used for presets and "paste settings". */
-    fun lookOnly(): EditState = copy(geometry = Geometry(), masks = emptyList())
+    fun lookOnly(): EditState = copy(geometry = Geometry(), masks = emptyList(), heals = emptyList())
 
-    /** Applies a preset/look on top of this edit while keeping crop and masks. */
-    fun applyLook(look: EditState): EditState = look.copy(geometry = geometry, masks = masks)
+    /** Applies a preset/look on top of this edit while keeping crop, masks and healing. */
+    fun applyLook(look: EditState): EditState = look.copy(geometry = geometry, masks = masks, heals = heals)
 
     /** True when the edit uses the on-device person segmentation (person mask, portrait blur, skin). */
     val needsPersonMask: Boolean
         get() = hasEffect(EffectType.BOKEH) || enhance.skin > 0f ||
             masks.any { it.enabled && it.kind == MaskKind.PERSON }
 
-    /** Drops the photo-only features (person masks, portrait blur) for video rendering. */
+    /** Drops the photo-only features (person masks, portrait blur, healing) for video rendering. */
     fun forVideo(): EditState =
-        if (!hasEffect(EffectType.BOKEH) && masks.none { it.kind == MaskKind.PERSON }) this
-        else withoutEffect(EffectType.BOKEH).copy(masks = masks.filter { it.kind != MaskKind.PERSON })
+        if (!hasEffect(EffectType.BOKEH) && masks.none { it.kind == MaskKind.PERSON } && heals.isEmpty()) this
+        else withoutEffect(EffectType.BOKEH).copy(masks = masks.filter { it.kind != MaskKind.PERSON }, heals = emptyList())
 
     companion object {
         const val CURRENT_VERSION = 1
     }
 }
+
+/**
+ * One healed blemish: the circle at ([x], [y]) is covered with texture from ([sx], [sy]), colour
+ * matched to its surroundings. Coordinates are source uv (they follow crop and rotation);
+ * [radius] is a fraction of the source's shorter side.
+ */
+@Serializable
+data class HealSpot(
+    val id: Long,
+    val x: Float,
+    val y: Float,
+    val radius: Float,
+    val sx: Float,
+    val sy: Float,
+    /** 0 hard edge .. 1 very soft. */
+    val feather: Float = 0.5f,
+)
+
+@Serializable
+enum class RangeMode {
+    @SerialName("none") NONE,
+    @SerialName("luminance") LUMINANCE,
+    @SerialName("color") COLOR,
+}
+
+/**
+ * Range limit of a local mask, like Lightroom's range mask: only pixels whose brightness lies in
+ * [low]..[high] (percent), or whose hue is within [tolerance] of [hue] (degrees), are affected.
+ * [softness] widens the edges of the band (0..100).
+ */
+@Serializable
+data class MaskRange(
+    val mode: RangeMode = RangeMode.NONE,
+    val low: Float = 0f,
+    val high: Float = 100f,
+    val hue: Float = 210f,
+    val tolerance: Float = 30f,
+    val softness: Float = 50f,
+)

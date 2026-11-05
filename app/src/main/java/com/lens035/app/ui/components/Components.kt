@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +37,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -153,7 +157,12 @@ fun ToolTile(
     band: Color? = null,
     active: Boolean = selected,
     placeholderIcon: ImageVector? = null,
+    /** Starred by the user: a small star before the title. */
+    favorite: Boolean = false,
+    /** Long press (e.g. star / unstar); null disables it. */
+    onLongClick: (() -> Unit)? = null,
 ) {
+    val haptics = LocalHapticFeedback.current
     Column(modifier = modifier.width(68.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(width = 68.dp, height = 84.dp)) {
             Box(
@@ -162,7 +171,17 @@ fun ToolTile(
                     .clip(LensShapes.Thumb)
                     .background(LensColors.Raised)
                     .then(if (selected) Modifier.border(2.dp, LensColors.Accent, LensShapes.Thumb) else Modifier)
-                    .clickable(role = Role.Button, onClick = onClick),
+                    .combinedClickable(
+                        role = Role.Button,
+                        onClick = onClick,
+                        onLongClickLabel = if (onLongClick != null) (if (favorite) "Favorilerden çıkar" else "Favorilere ekle") else null,
+                        onLongClick = onLongClick?.let { action ->
+                            {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                action()
+                            }
+                        },
+                    ),
             ) {
                 if (image != null) {
                     Image(image, title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -187,7 +206,18 @@ fun ToolTile(
                         }
                     }
                 }
-                if (active && !selected) {
+                if (favorite) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .padding(4.dp)
+                            .size(18.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.Star, "Favori", tint = LensColors.Accent, modifier = Modifier.size(12.dp))
+                    }
+                } else if (active && !selected) {
                     Box(
                         Modifier
                             .align(Alignment.TopStart)

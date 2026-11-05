@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.lens035.app.Lens035App
 import com.lens035.app.data.Project
 import com.lens035.app.gl.GlException
+import com.lens035.app.gl.LutCache
 import com.lens035.app.gl.PersonMaskData
 import com.lens035.app.media.BitmapLoader
 import com.lens035.app.media.DateStamp
@@ -22,10 +23,13 @@ import com.lens035.app.media.ImageMeta
 import com.lens035.app.media.MediaSaver
 import com.lens035.app.media.PersonSegmenter
 import com.lens035.core.analysis.ImageAnalyzer
+import com.lens035.core.color.ColorTransfer
 import com.lens035.core.film.FilmCatalog
 import com.lens035.core.model.EditState
 import com.lens035.core.model.EffectType
+import com.lens035.core.model.GeometryMath
 import com.lens035.core.presets.Looks
+import com.lens035.core.render.CanvasLayout
 import com.lens035.core.render.FilmDefaults
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -64,7 +68,8 @@ internal suspend fun renderToolThumbnails(
 ): Triple<Map<String, ImageBitmap>, Map<EffectType, ImageBitmap>, Map<String, ImageBitmap>> {
     val films = FilmCatalog.all
     val filmStates = films.map { EditState(film = FilmDefaults.settingsFor(it)) }
-    val effectTypes = EffectType.entries
+    // The canvas tile shows an icon: a thumbnail cannot show a change of shape.
+    val effectTypes = EffectType.entries.filter { it != EffectType.CANVAS }
     val effectStates = effectTypes.map { thumbnailEffectState(it) }
     val lookStates = Looks.all.map { it.state }
     val all = app.offscreen.execute { gl -> gl.renderAll(thumb, filmStates + effectStates + lookStates, stats, dateText) }
@@ -146,7 +151,7 @@ class PhotoSession(
                 }
                 preview = decoded.bitmap
                 if (existing == null && initialFilmId != null) {
-                    FilmCatalog.find(initialFilmId)?.let { state = state.copy(film = FilmDefaults.settingsFor(it)) }
+                    FilmCatalog.find(initialFilmId)?.let { startWith(state.copy(film = FilmDefaults.settingsFor(it))) }
                 }
                 takePersistablePermission()
                 loading = false
@@ -209,6 +214,42 @@ class PhotoSession(
             if (small !== bmp) small.recycle()
             AnalysisPixels(px, small.width, small.height)
         }
+    }
+
+    /**
+     * Builds a colour-match LUT that takes this photo, as edited so far (without a custom LUT),
+     * towards the colours of [reference], saves it with the custom LUTs and returns its file name.
+     */
+    suspend fun createColorMatch(reference: Uri): String {
+        val bmp = preview ?: throw IllegalStateException("Fotoğraf henüz hazır değil.")
+        val small = histSource ?: withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(bmp, 220) }.also { histSource = it }
+        val current = state.copy(customLut = null).withoutEffect(EffectType.CANVAS)
+        val mask = if (current.needsPersonMask) personMask else null
+        val rendered = app.offscreen.execute { gl -> gl.render(small, current, stats, dateText, meta.width, meta.height, mask) }
+        val targetPx = withContext(Dispatchers.Default) { argbPixels(rendered).also { rendered.recycle() } }
+        val ref = withContext(Dispatchers.IO) { BitmapLoader.decode(context, reference, 256) }
+        val refPx = withContext(Dispatchers.Default) { argbPixels(ref.bitmap).also { ref.bitmap.recycle() } }
+        val cube = withContext(Dispatchers.Default) {
+            val lut = ColorTransfer.buildLut(ColorTransfer.stats(targetPx), ColorTransfer.stats(refPx))
+            ColorTransfer.toCube(lut, "Lens035 renk eşleştirme")
+        }
+        return withContext(Dispatchers.IO) {
+            val dir = LutCache.directory() ?: throw IllegalStateException("LUT klasörü yok.")
+            var n = 1
+            var name: String
+            do {
+                name = "Eşleşme $n.cube"
+                n++
+            } while (File(dir, name).exists())
+            File(dir, name).writeText(cube)
+            name
+        }
+    }
+
+    private fun argbPixels(b: Bitmap): IntArray {
+        val px = IntArray(b.width * b.height)
+        b.getPixels(px, 0, b.width, 0, 0, b.width, b.height)
+        return px
     }
 
     /** Finds the person in the photo once, on the device. Later calls reuse the result. */
@@ -279,9 +320,11 @@ class PhotoSession(
     }
 
     /** RGB + luminance histograms (4 x 256 bins) of a small render of [s]. */
-    suspend fun histogram(s: EditState): IntArray? {
+    suspend fun histogram(edit: EditState): IntArray? {
         val bmp = preview ?: return null
         val src = histSource ?: withContext(Dispatchers.Default) { BitmapLoader.scaledCopy(bmp, 220) }.also { histSource = it }
+        // The photo's tones only: a canvas fill would swamp the histogram.
+        val s = edit.withoutEffect(EffectType.CANVAS)
         return try {
             val mask = if (s.needsPersonMask) personMask else null
             val out = app.offscreen.execute { gl -> gl.render(src, s, stats, dateText, meta.width, meta.height, mask) }
@@ -344,6 +387,14 @@ class PhotoSession(
         val maxTex = app.offscreen.execute { it.maxTextureSize }
         val longest = max(meta.width, meta.height)
         var side = minOf(options.size.maxSide, maxTex, if (longest > 0) longest else options.size.maxSide)
+        // A canvas grows around the photo: keep the whole canvas within the GPU's texture limit.
+        if (longest > 0 && s.hasEffect(EffectType.CANVAS)) {
+            val k = side / longest.toFloat()
+            val photo = GeometryMath.outputSize((meta.width * k).roundToInt().coerceAtLeast(1), (meta.height * k).roundToInt().coerceAtLeast(1), s.geometry)
+            val canvas = CanvasLayout.of(s, photo.width, photo.height)
+            val canvasLongest = max(canvas.width, canvas.height)
+            if (canvasLongest > maxTex) side = (side * maxTex / canvasLongest.toFloat()).roundToInt().coerceAtLeast(512)
+        }
         var lastError: Throwable? = null
         repeat(3) {
             try {

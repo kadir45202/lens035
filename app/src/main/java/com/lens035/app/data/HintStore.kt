@@ -20,6 +20,7 @@ class HintStore(context: Context) {
     companion object {
         const val PHOTO_STRIP = "photo_strip"
         const val PHOTO_COMPARE = "photo_compare"
+        const val FAVORITES = "favorites"
         const val VIDEO_BASICS = "video_basics"
         const val POSE_BASICS = "pose_basics"
     }

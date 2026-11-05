@@ -33,18 +33,31 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.lens035.app.gl.PhotoRenderer
 import com.lens035.app.gl.PreviewMode
 import com.lens035.app.gl.ViewTransform
-import com.lens035.core.model.CropRect
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.render.CanvasLayout
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Size of the image the preview currently shows, for a mode (crop mode shows the whole frame). */
 fun previewOutputSize(session: PhotoSession, mode: PreviewMode): IntSize {
-    val bmp = session.preview ?: return IntSize(1, 1)
-    val g = if (mode == PreviewMode.CROP) session.state.geometry.copy(crop = CropRect.FULL) else session.state.geometry
-    val out = GeometryMath.outputSize(bmp.width, bmp.height, g)
-    return IntSize(out.width, out.height)
+    val c = previewCanvas(session, mode) ?: return IntSize(1, 1)
+    return IntSize(c.width, c.height)
+}
+
+/** The preview's output for a mode: canvas size and where the photo sits in it. */
+private fun previewCanvas(session: PhotoSession, mode: PreviewMode): CanvasLayout? {
+    val bmp = session.preview ?: return null
+    val s = PhotoRenderer.effectiveState(session.state, mode)
+    val out = GeometryMath.outputSize(bmp.width, bmp.height, s.geometry)
+    return CanvasLayout.of(s, out.width, out.height)
+}
+
+/** [vt] narrowed to the photo itself when it sits on a canvas (overlays work in photo space). */
+fun photoViewTransform(session: PhotoSession, mode: PreviewMode, vt: ViewTransform): ViewTransform {
+    val c = previewCanvas(session, mode) ?: return vt
+    if (c.isNone) return vt
+    return ViewTransform(vt.left + c.innerX * vt.width, vt.top + c.innerY * vt.height, c.innerW * vt.width, c.innerH * vt.height)
 }
 
 /**
@@ -191,7 +204,7 @@ fun PhotoCanvas(
     ) {
         AndroidView(factory = { glView }, modifier = Modifier.fillMaxSize())
         if (viewSize.width > 0 && preview != null) {
-            overlay(vt)
+            overlay(photoViewTransform(session, mode, vt))
             if (split != null && mode == PreviewMode.NORMAL) SplitDivider(split, vt, onSplit)
         }
     }

@@ -13,6 +13,7 @@ import com.lens035.app.media.DateStamp
 import com.lens035.core.analysis.ImageStats
 import com.lens035.core.model.EditState
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.render.CanvasLayout
 import com.lens035.core.render.RenderContext
 import com.lens035.core.render.ShaderParams
 import kotlin.math.max
@@ -51,6 +52,7 @@ private class LensShaderProgram(
     private var workH = 0
     private var outW = 0
     private var outH = 0
+    private var canvas = CanvasLayout.none(2, 2)
     private var frameIndex = 0L
     private val filmLut = LutCache.film(state.film?.id)
     private val customLut = LutCache.custom(state.customLut)
@@ -59,13 +61,20 @@ private class LensShaderProgram(
     override fun configure(inputWidth: Int, inputHeight: Int): Size {
         try {
             if (pipeline == null) pipeline = LensPipeline(ShaderSources.get(context)).also { it.init() }
-            val scale = minOf(1f, maxOutputSide / max(inputWidth, inputHeight).toFloat())
-            workW = even((inputWidth * scale).roundToInt())
-            workH = even((inputHeight * scale).roundToInt())
-            val out = GeometryMath.outputSize(workW, workH, state.geometry, evenDimensions = true)
-            outW = out.width
-            outH = out.height
-            return Size(outW, outH)
+            // The limit applies to the final frame, which a canvas makes larger than the video.
+            var scale = minOf(1f, maxOutputSide / max(inputWidth, inputHeight).toFloat())
+            for (attempt in 0 until 3) {
+                workW = even((inputWidth * scale).roundToInt())
+                workH = even((inputHeight * scale).roundToInt())
+                val out = GeometryMath.outputSize(workW, workH, state.geometry, evenDimensions = true)
+                outW = out.width
+                outH = out.height
+                canvas = CanvasLayout.of(state, outW, outH, evenDimensions = true)
+                val longest = max(canvas.width, canvas.height)
+                if (longest <= maxOutputSide) break
+                scale *= maxOutputSide / longest.toFloat()
+            }
+            return Size(canvas.width, canvas.height)
         } catch (e: Exception) {
             throw VideoFrameProcessingException(e)
         }
@@ -78,15 +87,15 @@ private class LensShaderProgram(
             GLES30.glGetIntegerv(GLES30.GL_FRAMEBUFFER_BINDING, framebufferBinding, 0)
             val fbo = framebufferBinding[0]
             frameIndex++
-            val ctx = RenderContext(workW, workH, workW, workH, outW, outH, presentationTimeUs / 1_000_000f, frameIndex.toInt())
+            val ctx = RenderContext(workW, workH, workW, workH, outW, outH, presentationTimeUs / 1_000_000f, frameIndex.toInt(), canvas)
             val params = ShaderParams.build(state, ctx, stats, dateText)
             val res = FrameResources(filmLut, customLut, { DateStamp.bitmap(it) })
             p.render(
                 PipelineInput(inputTexId, InputKind.TEXTURE_BOTTOM_UP, workW, workH, frameIndex),
-                params, res, PipelineOutput.External(fbo, outW, outH, flipY = true),
+                params, res, PipelineOutput.External(fbo, canvas.width, canvas.height, flipY = true),
             )
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo)
-            GLES30.glViewport(0, 0, outW, outH)
+            GLES30.glViewport(0, 0, canvas.width, canvas.height)
         } catch (e: Exception) {
             throw VideoFrameProcessingException(e, presentationTimeUs)
         }

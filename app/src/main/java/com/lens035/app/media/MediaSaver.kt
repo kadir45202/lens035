@@ -33,8 +33,22 @@ object MediaSaver {
 
     fun needsLegacyPermission(): Boolean = Build.VERSION.SDK_INT < 29
 
+    /** Millisecond names: batch exports save several files within one second. */
     fun newName(prefix: String): String =
-        "${prefix}_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        "${prefix}_" + SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+
+    /** [name] in [dir], or name_2, name_3… if taken, so an older file is never overwritten. */
+    private fun uniqueFile(dir: File, name: String): File {
+        var file = File(dir, name)
+        val base = name.substringBeforeLast('.')
+        val ext = name.substringAfterLast('.', "")
+        var n = 2
+        while (file.exists()) {
+            file = File(dir, if (ext.isEmpty()) "${base}_$n" else "${base}_$n.$ext")
+            n++
+        }
+        return file
+    }
 
     @Throws(IOException::class)
     fun saveImage(context: Context, bitmap: Bitmap, format: ImageFormat, quality: Int, meta: ImageMeta?): Uri {
@@ -66,7 +80,7 @@ object MediaSaver {
             @Suppress("DEPRECATION")
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), ALBUM)
             if (!dir.exists() && !dir.mkdirs()) throw IOException("Klasör oluşturulamadı")
-            val file = File(dir, name)
+            val file = uniqueFile(dir, name)
             FileOutputStream(file).use { out -> writeBitmap(bitmap, compressFormat, quality, out) }
             if (format == ImageFormat.JPEG) {
                 try {
@@ -110,8 +124,8 @@ object MediaSaver {
             @Suppress("DEPRECATION")
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), ALBUM)
             if (!dir.exists() && !dir.mkdirs()) throw IOException("Klasör oluşturulamadı")
-            val file = File(dir, name)
-            source.copyTo(file, overwrite = true)
+            val file = uniqueFile(dir, name)
+            source.copyTo(file)
             insertLegacy(context, file, "video/mp4", MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
         }
     }

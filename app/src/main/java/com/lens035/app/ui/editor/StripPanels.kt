@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -69,18 +70,64 @@ private fun TileRow(content: androidx.compose.foundation.lazy.LazyListScope.() -
 
 // ---------------------------------------------------------------------------- films
 
-private val filmFilters: List<FilmCategory?> = listOf(null) + FilmCategory.entries
+/** Filter of a tool strip: everything, the user's favourites, or one category. */
+sealed interface StripFilter<out T> {
+    data object All : StripFilter<Nothing>
+    data object Favorites : StripFilter<Nothing>
+    data class Of<T>(val value: T) : StripFilter<T>
+}
+
+/** "Tümü", "Favoriler" (once something is starred) and the categories. */
+@Composable
+private fun <T> FilterChips(categories: List<T>, label: (T) -> String, selected: StripFilter<T>, showFavorites: Boolean, onSelect: (StripFilter<T>) -> Unit) {
+    val items: List<StripFilter<T>> = buildList {
+        add(StripFilter.All)
+        if (showFavorites || selected == StripFilter.Favorites) add(StripFilter.Favorites)
+        categories.forEach { add(StripFilter.Of(it)) }
+    }
+    ChipRow(items, selected, { f ->
+        when (f) {
+            StripFilter.All -> "Tümü"
+            StripFilter.Favorites -> "Favoriler"
+            is StripFilter.Of -> label(f.value)
+        }
+    }, onSelect)
+}
+
+/** Shown in place of tiles when the favourites filter is empty. */
+@Composable
+private fun NoFavoritesYet(what: String) {
+    Text(
+        "Henüz favori $what yok. Bir kutucuğa uzun bas, yıldızlansın ve burada toplansın.",
+        style = LensType.Meta,
+        color = LensColors.Faint,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 30.dp),
+    )
+}
 
 @Composable
-fun FilmsStrip(session: EditSession, onDetails: () -> Unit) {
-    var category by remember { mutableStateOf<FilmCategory?>(null) }
+fun FilmsStrip(
+    session: EditSession,
+    favorites: Set<String> = emptySet(),
+    onToggleFavorite: ((String) -> Unit)? = null,
+    onDetails: () -> Unit,
+) {
+    var filter by remember { mutableStateOf<StripFilter<FilmCategory>>(StripFilter.All) }
     val selectedId = session.state.film?.id
-    val films = FilmCatalog.all.filter { category == null || it.category == category }
+    val films = when (val f = filter) {
+        StripFilter.All -> FilmCatalog.all
+        StripFilter.Favorites -> FilmCatalog.all.filter { it.id in favorites }
+        is StripFilter.Of -> FilmCatalog.all.filter { it.category == f.value }
+    }
     val listState = rememberLazyListState()
-    LaunchedEffect(category) { listState.scrollToItem(0) }
+    LaunchedEffect(filter) { listState.scrollToItem(0) }
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-        ChipRow(filmFilters, category, { it?.label ?: "Tümü" }, { category = it })
+        FilterChips(FilmCategory.entries, { it.label }, filter, favorites.isNotEmpty()) { filter = it }
         Spacer(Modifier.height(10.dp))
+        if (filter == StripFilter.Favorites && films.isEmpty()) {
+            NoFavoritesYet("film")
+            return@Column
+        }
         LazyRow(
             state = listState,
             modifier = Modifier.fillMaxWidth(),
@@ -109,6 +156,8 @@ fun FilmsStrip(session: EditSession, onDetails: () -> Unit) {
                         if (selected) onDetails() else session.update { it.copy(film = FilmDefaults.settingsFor(film)) }
                     },
                     onDetails = onDetails,
+                    favorite = film.id in favorites,
+                    onLongClick = onToggleFavorite?.let { toggle -> { toggle(film.id) } },
                 )
             }
         }
@@ -176,27 +225,42 @@ fun SliderItem(
 
 // ---------------------------------------------------------------------------- effects
 
-private val effectFilters: List<EffectCategory?> = listOf(null) + EffectCategory.entries
-
-/** Effect tiles by category. [exclude] hides effects the medium cannot do (portrait blur in video). */
+/**
+ * Effect tiles by category. [exclude] hides effects the medium cannot do (portrait blur in video).
+ * [favorites] holds starred effect type names.
+ */
 @Composable
 fun EffectsStrip(
     session: EditSession,
     focused: EffectType?,
     exclude: Set<EffectType> = emptySet(),
+    favorites: Set<String> = emptySet(),
+    onToggleFavorite: ((String) -> Unit)? = null,
     onDetails: (EffectType) -> Unit,
 ) {
-    var category by remember { mutableStateOf<EffectCategory?>(null) }
-    val types = EffectType.entries.filter { (category == null || it.category == category) && it !in exclude }
+    var filter by remember { mutableStateOf<StripFilter<EffectCategory>>(StripFilter.All) }
+    val types = EffectType.entries.filter { type ->
+        type !in exclude && when (val f = filter) {
+            StripFilter.All -> true
+            StripFilter.Favorites -> type.name in favorites
+            is StripFilter.Of -> type.category == f.value
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-        ChipRow(effectFilters, category, { it?.label ?: "Tümü" }, { category = it })
+        FilterChips(EffectCategory.entries, { it.label }, filter, favorites.any { name -> EffectType.entries.any { it.name == name && it !in exclude } }) { filter = it }
         Spacer(Modifier.height(10.dp))
+        if (filter == StripFilter.Favorites && types.isEmpty()) {
+            NoFavoritesYet("efekt")
+            return@Column
+        }
         TileRow {
             items(types, key = { it.name }) { type ->
                 val active = session.state.hasEffect(type)
                 ToolTile(
                     title = type.title,
-                    image = session.effectThumbs[type],
+                    // A canvas changes the picture's shape, which a thumbnail cannot show.
+                    image = if (type == EffectType.CANVAS) null else session.effectThumbs[type],
+                    placeholderIcon = if (type == EffectType.CANVAS) Icons.Rounded.AspectRatio else null,
                     selected = active,
                     active = active,
                     onClick = {
@@ -207,6 +271,8 @@ fun EffectsStrip(
                         }
                     },
                     onDetails = { onDetails(type) },
+                    favorite = type.name in favorites,
+                    onLongClick = onToggleFavorite?.let { toggle -> { toggle(type.name) } },
                 )
             }
         }
@@ -290,8 +356,13 @@ fun LooksStrip(
     onSelectPreset: (UserPreset) -> Unit,
     onPresetDetails: (UserPreset) -> Unit,
     onSavePreset: () -> Unit,
+    favorites: Set<String> = emptySet(),
+    onToggleFavorite: ((String) -> Unit)? = null,
     onDetails: () -> Unit,
 ) {
+    var favoritesOnly by remember { mutableStateOf(false) }
+    if (favorites.isEmpty() && favoritesOnly) favoritesOnly = false
+    val looks = if (favoritesOnly) Looks.all.filter { it.id in favorites } else Looks.all
     val presetThumbs = remember { mutableStateMapOf<String, ImageBitmap>() }
     LaunchedEffect(userPresets, session.lookThumbs) {
         for (p in userPresets) {
@@ -299,8 +370,11 @@ fun LooksStrip(
         }
     }
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Tek dokunuşla görünümler", style = LensType.Label, color = LensColors.Muted, modifier = Modifier.weight(1f))
+            if (favorites.isNotEmpty()) {
+                LensChip(if (favoritesOnly) "Favoriler" else "Tümü", favoritesOnly, { favoritesOnly = !favoritesOnly })
+            }
         }
         Spacer(Modifier.height(10.dp))
         TileRow {
@@ -318,7 +392,7 @@ fun LooksStrip(
                     placeholderIcon = Icons.Rounded.Person,
                 )
             }
-            items(Looks.all, key = { it.id }) { look ->
+            items(looks, key = { it.id }) { look ->
                 val selected = selectedLook == look.id
                 ToolTile(
                     title = look.name,
@@ -327,6 +401,8 @@ fun LooksStrip(
                     band = Color(look.swatch.toInt()),
                     onClick = { if (selected) onDetails() else onSelectLook(look) },
                     onDetails = onDetails,
+                    favorite = look.id in favorites,
+                    onLongClick = onToggleFavorite?.let { toggle -> { toggle(look.id) } },
                 )
             }
         }

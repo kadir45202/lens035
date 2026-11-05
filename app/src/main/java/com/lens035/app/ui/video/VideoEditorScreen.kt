@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Flare
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
@@ -101,6 +102,7 @@ import com.lens035.app.ui.components.LensSheet
 import com.lens035.app.ui.components.PrimaryPill
 import com.lens035.app.ui.components.ToolTab
 import com.lens035.app.Lens035App
+import com.lens035.app.data.FavoriteKind
 import com.lens035.app.data.HintStore
 import com.lens035.app.data.UserPreset
 import com.lens035.app.ui.components.HintHost
@@ -113,6 +115,7 @@ import com.lens035.app.ui.editor.EffectDetails
 import com.lens035.app.ui.editor.EffectsStrip
 import com.lens035.app.ui.editor.FilmDetails
 import com.lens035.app.ui.editor.FilmsStrip
+import com.lens035.app.ui.editor.HistorySheet
 import com.lens035.app.ui.editor.LookDetails
 import com.lens035.app.ui.editor.LooksStrip
 import com.lens035.app.ui.editor.PresetDetails
@@ -185,12 +188,16 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
     var exportUi by remember { mutableStateOf<ExportUi>(ExportUi.Idle) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     var cropGuides by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
     var selectedLook by remember { mutableStateOf<String?>(null) }
     var lookBase by remember { mutableStateOf<EditState?>(null) }
     var lookStrength by remember { mutableStateOf(100f) }
     var showPresetDialog by remember { mutableStateOf(false) }
     val app = context.applicationContext as Lens035App
     val userPresets by app.presets.presets.collectAsState()
+    val favFilms by app.favorites.of(FavoriteKind.FILM).collectAsState()
+    val favEffects by app.favorites.of(FavoriteKind.EFFECT).collectAsState()
+    val favLooks by app.favorites.of(FavoriteKind.LOOK).collectAsState()
 
     val playerReleased = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val player = remember {
@@ -361,6 +368,7 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
             LensIconButton(Icons.AutoMirrored.Rounded.Undo, "Geri al", { session.undo() }, enabled = session.canUndo)
             LensIconButton(Icons.AutoMirrored.Rounded.Redo, "Yinele", { session.redo() }, enabled = session.canRedo)
             Spacer(Modifier.weight(1f))
+            LensIconButton(Icons.Rounded.History, "Geçmiş", { showHistory = true }, enabled = session.history.size > 1)
             Box(
                 Modifier.size(44.dp).pointerInput(Unit) {
                     detectTapGestures(onPress = {
@@ -471,9 +479,22 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
                         onPresetDetails = { p -> detail = VideoDetail.Preset(p) },
                         onSavePreset = { showPresetDialog = true },
                         onDetails = { Looks.find(selectedLook ?: "")?.let { detail = VideoDetail.LookStrength(it) } },
+                        favorites = favLooks,
+                        onToggleFavorite = { id -> app.favorites.toggle(FavoriteKind.LOOK, id) },
                     )
-                    t == VideoTool.FILM -> FilmsStrip(session) { detail = VideoDetail.Film }
-                    t == VideoTool.EFFECTS -> EffectsStrip(session, null, exclude = VIDEO_EXCLUDED_EFFECTS) { detail = VideoDetail.Effect(it) }
+                    t == VideoTool.FILM -> FilmsStrip(
+                        session,
+                        onDetails = { detail = VideoDetail.Film },
+                        favorites = favFilms,
+                        onToggleFavorite = { id -> app.favorites.toggle(FavoriteKind.FILM, id) },
+                    )
+                    t == VideoTool.EFFECTS -> EffectsStrip(
+                        session,
+                        null,
+                        exclude = VIDEO_EXCLUDED_EFFECTS,
+                        favorites = favEffects,
+                        onToggleFavorite = { id -> app.favorites.toggle(FavoriteKind.EFFECT, id) },
+                    ) { detail = VideoDetail.Effect(it) }
                     t == VideoTool.ADJUST -> AdjustTool(
                         session = session,
                         panel = adjustPanel,
@@ -497,6 +518,8 @@ fun VideoEditorScreen(screen: Screen.VideoEditor, navigator: Navigator) {
             }
         }
     }
+
+    HistorySheet(visible = showHistory, session = session, onDismiss = { showHistory = false })
 
     if (showPresetDialog) {
         SavePresetDialog(onDismiss = { showPresetDialog = false }) { name ->

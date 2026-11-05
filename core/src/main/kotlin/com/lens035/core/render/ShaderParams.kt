@@ -16,6 +16,8 @@ import com.lens035.core.model.GeometryMath
 import com.lens035.core.model.GradeWheel
 import com.lens035.core.model.HueBand
 import com.lens035.core.model.MaskKind
+import com.lens035.core.model.RangeMode
+import kotlin.math.roundToInt
 import kotlin.math.max
 import kotlin.math.min
 
@@ -34,6 +36,8 @@ data class RenderContext(
     val timeSeconds: Float = 0f,
     /** Frame index for per-frame noise in video, 0 for photos. */
     val frameIndex: Int = 0,
+    /** The canvas the photo is placed on (the render target's real size), if any. */
+    val canvas: CanvasLayout? = null,
 )
 
 /** Everything the GL pipeline needs for one frame, derived from an [EditState]. */
@@ -53,6 +57,10 @@ class RenderParams(
     val needsPersonMask: Boolean = false,
     /** Whether the portrait blur needs its background-only blur pyramid. */
     val needsBokehPyramid: Boolean = false,
+    /** Uniforms of the healing pass, or null when nothing is healed. */
+    val heal: UniformSet? = null,
+    /** Changes whenever the healing changes (cache key for the healed source). */
+    val healKey: String = "",
 )
 
 data class DateStampSpec(val text: String, val style: Int)
@@ -81,6 +89,9 @@ object FilmDefaults {
 object ShaderParams {
     const val MAX_MASKS = 4
 
+    /** Healed spots per photo the GPU pass handles. */
+    const val MAX_HEALS = 24
+
     fun build(
         state: EditState,
         ctx: RenderContext,
@@ -105,7 +116,26 @@ object ShaderParams {
             dateStamp = dateFx?.let { DateStampSpec(dateText, it.value(EffectType.DATE_STAMP.param("style")!!).toInt()) },
             needsPersonMask = state.needsPersonMask,
             needsBokehPyramid = state.hasEffect(EffectType.BOKEH),
+            heal = buildHeal(state),
+            healKey = if (state.heals.isEmpty()) "" else state.heals.take(MAX_HEALS).hashCode().toString(),
         )
+    }
+
+    /** Healing pass: destination circle + feather, then source centre, per spot. */
+    private fun buildHeal(s: EditState): UniformSet? {
+        val spots = s.heals.take(MAX_HEALS)
+        if (spots.isEmpty()) return null
+        val a = FloatArray(MAX_HEALS * 4)
+        val b = FloatArray(MAX_HEALS * 4)
+        spots.forEachIndexed { i, h ->
+            a[i * 4] = h.x; a[i * 4 + 1] = h.y; a[i * 4 + 2] = h.radius.coerceIn(0.001f, 0.5f); a[i * 4 + 3] = h.feather.coerceIn(0f, 1f)
+            b[i * 4] = h.sx; b[i * 4 + 1] = h.sy
+        }
+        return UniformSet().apply {
+            i("u_healCount", spots.size)
+            v4a("u_healA", a)
+            v4a("u_healB", b)
+        }
     }
 
     private fun buildMain(
@@ -205,6 +235,27 @@ object ShaderParams {
         }
         u.v4a("u_maskGeo", geo)
         u.v4a("u_maskAdj", adj)
+        // Range limits: mode (0 none, 1 brightness, 2 colour), then the band.
+        val range = FloatArray(MAX_MASKS * 4)
+        masks.forEachIndexed { i, m ->
+            val r = m.range
+            val o = i * 4
+            when (r.mode) {
+                RangeMode.NONE -> Unit
+                RangeMode.LUMINANCE -> {
+                    range[o] = 1f
+                    range[o + 1] = (minOf(r.low, r.high) / 100f).coerceIn(0f, 1f)
+                    range[o + 2] = (maxOf(r.low, r.high) / 100f).coerceIn(0f, 1f)
+                }
+                RangeMode.COLOR -> {
+                    range[o] = 2f
+                    range[o + 1] = ((r.hue % 360f + 360f) % 360f) / 360f
+                    range[o + 2] = (r.tolerance / 100f).coerceIn(0f, 1f)
+                }
+            }
+            range[o + 3] = (r.softness / 100f).coerceIn(0f, 1f)
+        }
+        u.v4a("u_maskRange", range)
     }
 
     /** Returns true when the bloom pyramid of the graded image is required. */
@@ -367,8 +418,26 @@ object ShaderParams {
             u.v3("u_dateColor", DATE_COLORS[0])
         }
 
+        // Canvas: where the photo sits in the larger target, and what fills the rest.
+        val canvasFx = fx(EffectType.CANVAS)
+        val canvas = ctx.canvas
+        val canvasOn = canvasFx != null && canvas != null && !canvas.isNone
+        val fill = canvasFx?.raw("fill")?.roundToInt()?.coerceIn(0, CanvasLayout.FILLS.size - 1) ?: 0
+        if (canvasOn) {
+            u.v4("u_canvas", 1f, fill.toFloat(), (canvasFx!!.v("corner")).coerceIn(0f, 1f), 0f)
+            u.v4("u_canvasInner", canvas!!.innerX, canvas.innerY, canvas.innerW, canvas.innerH)
+            u.v2("u_canvasSize", canvas.width.toFloat(), canvas.height.toFloat())
+        } else {
+            u.v4("u_canvas", 0f, 0f, 0f, 0f)
+            u.v4("u_canvasInner", 0f, 0f, 1f, 1f)
+            u.v2("u_canvasSize", ctx.outWidth.toFloat(), ctx.outHeight.toFloat())
+        }
+        u.v3("u_canvasColor", CanvasLayout.FILLS[fill])
+
         return halAmount > 0f || glowAmount > 0f || orton > 0f ||
-            s.hasEffect(EffectType.KIRA) || s.hasEffect(EffectType.SOFT_FOCUS) || s.hasEffect(EffectType.TILT_SHIFT)
+            s.hasEffect(EffectType.KIRA) || s.hasEffect(EffectType.SOFT_FOCUS) || s.hasEffect(EffectType.TILT_SHIFT) ||
+            // The blurred fill is the bloom pyramid's widest level.
+            (canvasOn && fill == 0)
     }
 
     private val DATE_COLORS = arrayOf(

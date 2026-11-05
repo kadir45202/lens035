@@ -6,6 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -34,11 +35,15 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.CameraRoll
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Gradient
+import androidx.compose.material.icons.rounded.Healing
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -77,6 +82,7 @@ import com.lens035.app.gl.LutCache
 import com.lens035.app.gl.PreviewMode
 import com.lens035.app.media.ImageFormat
 import com.lens035.app.media.MediaSaver
+import com.lens035.app.data.FavoriteKind
 import com.lens035.app.data.HintStore
 import com.lens035.app.ui.components.HintHost
 import com.lens035.app.ui.components.LensIconButton
@@ -90,11 +96,17 @@ import com.lens035.app.ui.theme.LensShapes
 import com.lens035.app.ui.theme.LensType
 import com.lens035.core.lut.CubeParser
 import com.lens035.core.model.EffectType
+import com.lens035.core.analysis.HealSource
+import com.lens035.core.analysis.Upright
 import com.lens035.core.model.GeometryMath
+import com.lens035.core.model.HealSpot
+import com.lens035.core.render.ShaderParams
 import com.lens035.core.model.MaskKind
 import com.lens035.core.presets.Look
 import com.lens035.core.presets.Looks
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -107,6 +119,7 @@ enum class EditorTool(val label: String, val icon: ImageVector) {
     ADJUST("Ayarla", Icons.Rounded.Tune),
     CROP("Kırp", Icons.Rounded.Crop),
     MASKS("Maske", Icons.Rounded.Gradient),
+    RETOUCH("Rötuş", Icons.Rounded.Healing),
 }
 
 /** Which fine-tuning panel is open over the tool strip. */
@@ -144,6 +157,9 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     var split by remember { mutableStateOf<Float?>(null) }
     var selectedMask by remember { mutableStateOf<Long?>(null) }
     var cropGuides by remember { mutableStateOf(false) }
+    var selectedHeal by remember { mutableStateOf<Long?>(null) }
+    var healBrush by remember { mutableStateOf(DEFAULT_HEAL_RADIUS) }
+    var healLuma by remember { mutableStateOf<Triple<FloatArray, Int, Int>?>(null) }
     var selectedLook by remember { mutableStateOf<String?>(null) }
     var lookBase by remember { mutableStateOf<com.lens035.core.model.EditState?>(null) }
     var lookStrength by remember { mutableStateOf(100f) }
@@ -154,9 +170,13 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
     var quality by remember { mutableStateOf(Quality.HIGH) }
     var showPresetDialog by remember { mutableStateOf(false) }
     var showHistogram by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
     var histogram by remember { mutableStateOf<IntArray?>(null) }
     val customLuts = remember { mutableStateListOf<String>() }
     val userPresets by app.presets.presets.collectAsState()
+    val favFilms by app.favorites.of(FavoriteKind.FILM).collectAsState()
+    val favEffects by app.favorites.of(FavoriteKind.EFFECT).collectAsState()
+    val favLooks by app.favorites.of(FavoriteKind.LOOK).collectAsState()
 
     LaunchedEffect(Unit) {
         val names = withContext(Dispatchers.IO) {
@@ -171,7 +191,11 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
         histogram = session.histogram(session.state)
     }
     // First-run tips; each disappears for good once read or once the person does what it says.
-    val hints = rememberHintQueue(HintStore.PHOTO_STRIP, HintStore.PHOTO_COMPARE)
+    val hints = rememberHintQueue(HintStore.PHOTO_STRIP, HintStore.PHOTO_COMPARE, HintStore.FAVORITES)
+    fun toggleFavorite(kind: FavoriteKind, id: String) {
+        app.favorites.toggle(kind, id)
+        hints.done(HintStore.FAVORITES)
+    }
     LaunchedEffect(session.canUndo) { if (session.canUndo) hints.done(HintStore.PHOTO_STRIP) }
     LaunchedEffect(comparing, split) { if (comparing || split != null) hints.done(HintStore.PHOTO_COMPARE) }
     // Portrait blur, skin smoothing and person masks need to know where the person is.
@@ -203,6 +227,95 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
 
     val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) doExport() else Toast.makeText(context, "Galeriye kaydetmek için depolama izni gerekli.", Toast.LENGTH_LONG).show()
+    }
+
+    // ------------------------------------------------------------------ healing
+    suspend fun lumaForHealing(): Triple<FloatArray, Int, Int>? {
+        healLuma?.let { return it }
+        val px = session.analysisPixels() ?: return null
+        return withContext(Dispatchers.Default) { Triple(Upright.luma(px.argb), px.width, px.height) }.also { healLuma = it }
+    }
+    fun addHeal(uv: Offset) {
+        if (uv.x !in 0f..1f || uv.y !in 0f..1f) return
+        if (session.state.heals.size >= ShaderParams.MAX_HEALS) {
+            Toast.makeText(context, "Bir fotoğrafta en fazla ${ShaderParams.MAX_HEALS} leke giderilebilir.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val radius = healBrush
+        scope.launch {
+            val l = lumaForHealing() ?: return@launch
+            val (sx, sy) = withContext(Dispatchers.Default) { HealSource.pick(l.first, l.second, l.third, uv.x, uv.y, radius) }
+            val id = (session.state.heals.maxOfOrNull { it.id } ?: 0L) + 1L
+            session.update { it.copy(heals = it.heals + HealSpot(id, uv.x, uv.y, radius, sx, sy, 0.5f)) }
+            selectedHeal = id
+        }
+    }
+    fun repickHeal(spot: HealSpot) {
+        scope.launch {
+            val l = lumaForHealing() ?: return@launch
+            val (sx, sy) = withContext(Dispatchers.Default) {
+                HealSource.pick(l.first, l.second, l.third, spot.x, spot.y, spot.radius, avoid = listOf(spot.sx to spot.sy))
+            }
+            session.update { s -> s.copy(heals = s.heals.map { if (it.id == spot.id) it.copy(sx = sx, sy = sy) else it }) }
+        }
+    }
+
+    // ------------------------------------------------------------------ colour match from another photo
+    val matchPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val name = session.createColorMatch(uri)
+                if (name !in customLuts) customLuts.add(name)
+                LutCache.invalidateCustom(name)
+                session.update { it.copy(customLut = name, customLutStrength = 100f) }
+                // Show where it landed: the LUT panel with its strength slider.
+                detail = null
+                tool = EditorTool.ADJUST
+                adjustPanel = AdjustPanel.LUT
+                Toast.makeText(context, "Renkler eşleştirildi. Yoğunluğu buradan ayarlayabilirsin.", Toast.LENGTH_SHORT).show()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Renkler eşleştirilemedi.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    fun matchColors() = matchPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+
+    // ------------------------------------------------------------------ batch: this edit on other photos
+    var batchUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var batchUi by remember { mutableStateOf<BatchUi?>(null) }
+    var batchJob by remember { mutableStateOf<Job?>(null) }
+    fun startBatch() {
+        val uris = batchUris
+        val look = session.state.lookOnly()
+        val options = exportOptions.copy(quality = quality.value)
+        val total = uris.size
+        batchUi = BatchUi.Running(0, 0, total)
+        batchJob = scope.launch {
+            var saved = 0
+            var failed = 0
+            try {
+                BatchExporter(context).run(uris, look, options) { s, f ->
+                    saved = s
+                    failed = f
+                    batchUi = BatchUi.Running(s, f, total)
+                }
+            } finally {
+                batchUi = BatchUi.Finished(saved, failed, stopped = saved + failed < total)
+                batchJob = null
+            }
+        }
+    }
+    val batchPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startBatch() else Toast.makeText(context, "Galeriye kaydetmek için depolama izni gerekli.", Toast.LENGTH_LONG).show()
+    }
+    val batchPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(BatchExporter.MAX_PHOTOS)) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            batchUris = uris
+            batchUi = BatchUi.Ready(uris.size)
+        }
     }
     val lutPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -247,6 +360,10 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
             Box {
                 LensIconButton(Icons.Rounded.MoreHoriz, "Diğer", { menuOpen = true })
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Geçmiş") }, onClick = {
+                        showHistory = true
+                        menuOpen = false
+                    }, leadingIcon = { Icon(Icons.Rounded.History, null) })
                     DropdownMenuItem(text = { Text("Histogram " + if (showHistogram) "gizle" else "göster") }, onClick = {
                         showHistogram = !showHistogram
                         menuOpen = false
@@ -264,6 +381,14 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                         showPresetDialog = true
                         menuOpen = false
                     })
+                    DropdownMenuItem(text = { Text("Renkleri başka fotoğraftan al") }, onClick = {
+                        menuOpen = false
+                        matchColors()
+                    }, leadingIcon = { Icon(Icons.Rounded.Colorize, null) })
+                    DropdownMenuItem(text = { Text("Başka fotoğraflara uygula") }, onClick = {
+                        menuOpen = false
+                        batchPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }, leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, null) })
                     DropdownMenuItem(text = { Text("Tümünü sıfırla") }, onClick = {
                         session.resetAll()
                         selectedLook = null
@@ -305,6 +430,40 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                             onGestureEnd = { session.endGesture() },
                             guides = cropGuides,
                         )
+                    }
+                    EditorTool.RETOUCH -> {
+                        val bmp = session.preview
+                        if (bmp != null && !comparing) {
+                            val g = session.state.geometry
+                            val mapper = SourceViewMapper(
+                                vt,
+                                GeometryMath.sourceToOutputRowMajor(bmp.width, bmp.height, g),
+                                GeometryMath.outputToSourceRowMajor(bmp.width, bmp.height, g),
+                                bmp.width.toFloat() / bmp.height,
+                            )
+                            HealOverlay(
+                                mapper = mapper,
+                                heals = session.state.heals,
+                                selectedId = selectedHeal,
+                                sourceWidth = bmp.width,
+                                sourceHeight = bmp.height,
+                                onTap = { uv -> addHeal(uv) },
+                                onSelect = { selectedHeal = it },
+                                onMove = { id, handle, uv ->
+                                    session.preview(
+                                        session.state.copy(
+                                            heals = session.state.heals.map {
+                                                if (it.id != id) it
+                                                else if (handle == HealHandle.SPOT) it.copy(x = uv.x.coerceIn(0f, 1f), y = uv.y.coerceIn(0f, 1f))
+                                                else it.copy(sx = uv.x.coerceIn(0f, 1f), sy = uv.y.coerceIn(0f, 1f))
+                                            },
+                                        ),
+                                    )
+                                },
+                                onGestureStart = { session.beginGesture() },
+                                onGestureEnd = { session.endGesture() },
+                            )
+                        }
                     }
                     EditorTool.MASKS -> {
                         val mask = activeMask
@@ -369,10 +528,11 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                 texts = mapOf(
                     HintStore.PHOTO_STRIP to "Bir filme ya da efekte dokun, hemen uygulanır. Seçiliyken yeniden dokun ya da köşedeki oka bas: ince ayarlar açılır.",
                     HintStore.PHOTO_COMPARE to "Orijinali görmek için fotoğrafa basılı tut. Üstteki karşılaştır düğmesine dokunursan önce/sonra yan yana görünür.",
+                    HintStore.FAVORITES to "Sık kullandığın bir film, efekt ya da görünüme uzun bas: yıldızlanır ve Favoriler'de toplanır.",
                 ),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                 visible = !session.loading && session.error == null && detail == null && !comparing && when (hints.current) {
-                    HintStore.PHOTO_STRIP -> tool == EditorTool.FILM || tool == EditorTool.LOOKS || tool == EditorTool.EFFECTS
+                    HintStore.PHOTO_STRIP, HintStore.FAVORITES -> tool == EditorTool.FILM || tool == EditorTool.LOOKS || tool == EditorTool.EFFECTS
                     else -> tool != EditorTool.CROP && tool != EditorTool.MASKS
                 },
             )
@@ -416,9 +576,21 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                             onPresetDetails = { p -> detail = Detail.Preset(p) },
                             onSavePreset = { showPresetDialog = true },
                             onDetails = { Looks.find(selectedLook ?: "")?.let { detail = Detail.LookStrength(it) } },
+                            favorites = favLooks,
+                            onToggleFavorite = { id -> toggleFavorite(FavoriteKind.LOOK, id) },
                         )
-                        t == EditorTool.FILM -> FilmsStrip(session) { detail = Detail.Film }
-                        t == EditorTool.EFFECTS -> EffectsStrip(session, null) { type -> detail = Detail.Effect(type) }
+                        t == EditorTool.FILM -> FilmsStrip(
+                            session,
+                            onDetails = { detail = Detail.Film },
+                            favorites = favFilms,
+                            onToggleFavorite = { id -> toggleFavorite(FavoriteKind.FILM, id) },
+                        )
+                        t == EditorTool.EFFECTS -> EffectsStrip(
+                            session,
+                            null,
+                            favorites = favEffects,
+                            onToggleFavorite = { id -> toggleFavorite(FavoriteKind.EFFECT, id) },
+                        ) { type -> detail = Detail.Effect(type) }
                         t == EditorTool.ADJUST -> AdjustTool(
                             session = session,
                             panel = adjustPanel,
@@ -432,9 +604,18 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
                                     LutCache.invalidateCustom(name)
                                 }
                             },
+                            onMatchColors = { matchColors() },
                         )
                         t == EditorTool.CROP -> CropTool(session, onGuides = { cropGuides = it })
                         t == EditorTool.MASKS -> MaskTool(session, selectedMask, { selectedMask = it }, personStatus = session.personStatus)
+                        t == EditorTool.RETOUCH -> RetouchTool(
+                            session = session,
+                            selectedId = selectedHeal,
+                            onSelect = { selectedHeal = it },
+                            brush = healBrush,
+                            onBrush = { healBrush = it },
+                            onRepick = { spot -> repickHeal(spot) },
+                        )
                     }
                 }
             }
@@ -469,6 +650,20 @@ fun PhotoEditorScreen(screen: Screen.PhotoEditor, navigator: Navigator) {
             showExport = false
             saveState = SaveState.Idle
         },
+    )
+
+    HistorySheet(visible = showHistory, session = session, onDismiss = { showHistory = false })
+
+    BatchExportSheet(
+        ui = batchUi,
+        summary = "${exportOptions.format.label} · ${quality.label} · ${exportOptions.size.label}",
+        onStart = {
+            val needsPermission = MediaSaver.needsLegacyPermission() &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+            if (needsPermission) batchPermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE) else startBatch()
+        },
+        onStop = { batchJob?.cancel() },
+        onDismiss = { if (batchJob == null) batchUi = null },
     )
 
     if (showPresetDialog) {

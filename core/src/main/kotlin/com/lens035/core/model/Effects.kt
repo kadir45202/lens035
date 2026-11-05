@@ -213,6 +213,17 @@ enum class EffectType(
             EffectParam("amount", "Kalınlık", 0f, 100f, 50f),
             choice("style", "Stil", listOf("Anlık", "İnce beyaz", "Siyah film", "Yuvarlak köşe")),
         ),
+    ),
+
+    @SerialName("canvas")
+    CANVAS(
+        "Tuval", EffectCategory.FRAME, "Kırpmadan hikâye, gönderi ya da kare tuvale sığdırır; boşluğu bulanık kopya ya da renkle doldurur.",
+        listOf(
+            EffectParam("amount", "Kenar boşluğu", 0f, 100f, 0f),
+            choice("ratio", "Oran", listOf("9:16", "4:5", "1:1", "16:9")),
+            choice("fill", "Dolgu", listOf("Bulanık", "Siyah", "Beyaz", "Krem")),
+            EffectParam("corner", "Köşe", 0f, 100f, 0f),
+        ),
     );
 
     val amountParam: EffectParam get() = params.first()
